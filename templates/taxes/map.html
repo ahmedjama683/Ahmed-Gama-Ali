@@ -1,0 +1,33 @@
+{% extends "base.html" %}{% load static %}
+{% block title %}Collection map{% endblock %}
+{% block head %}<link rel="stylesheet" href="{% static 'vendor/leaflet/leaflet.css' %}">{% endblock %}
+{% block content %}
+<h1>Where payments were collected</h1>
+<p class="muted">Each dot is a payment recorded with GPS (latest 5,000). Red = voided.</p>
+<div id="map"></div>
+{% endblock %}
+{% block scripts %}
+<script src="{% static 'vendor/leaflet/leaflet.js' %}"></script>
+<script>
+const map = L.map("map").setView([9.5624, 44.0770], 13);  // Hargeisa
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  maxZoom: 19, attribution: "&copy; OpenStreetMap contributors"
+}).addTo(map);
+fetch("{% url 'collection_map_data' %}" + location.search).then(r => r.json()).then(data => {
+  const pts = [];
+  data.points.forEach(p => {
+    const m = L.circleMarker([p.latitude, p.longitude], {
+      radius: 4, color: p.status === "VOIDED" ? "#c8102e" : "#006d3b", fillOpacity: 0.7
+    }).addTo(map);
+    const div = document.createElement("div");
+    div.innerHTML = "<strong></strong><br><span></span><br><span></span>";
+    div.children[0].textContent = p.receipt_number;
+    div.children[2].textContent = p.payer_name + " · " + p.amount_paid.toLocaleString() + " " + p.currency;
+    div.children[4].textContent = p.collected_at + " · " + (p.collector__employee_id || "");
+    m.bindPopup(div);
+    pts.push([p.latitude, p.longitude]);
+  });
+  if (pts.length) map.fitBounds(pts, {maxZoom: 16, padding: [20, 20]});
+});
+</script>
+{% endblock %}

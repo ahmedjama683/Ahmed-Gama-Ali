@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block title %}New payment{% endblock %}
+{% block content %}
+<div class="narrow">
+<h1>Record a payment</h1>
+{% if form.non_field_errors %}<div class="msg error">{{ form.non_field_errors }}</div>{% endif %}
+<form method="post" id="collection-form" novalidate>
+  {% csrf_token %}
+  {% for h in form.hidden_fields %}{{ h }}{% endfor %}
+  {% if form.latitude.errors %}<div class="msg error">{{ form.latitude.errors }}</div>{% endif %}
+
+  <div id="gps" class="gps">📍 Getting your location… allow location access when the phone asks.</div>
+  <p class="no-print"><button type="button" class="btn small secondary" id="gps-retry">Refresh location</button></p>
+
+  <fieldset><legend>Payer</legend>
+    {% include "taxes/_field.html" with f=form.taxpayer %}
+    {% include "taxes/_field.html" with f=form.payer_name %}
+    {% include "taxes/_field.html" with f=form.payer_phone %}
+    {% include "taxes/_field.html" with f=form.village %}
+    <a href="{% url 'taxpayer_create' %}">Register a new taxpayer</a>
+  </fieldset>
+
+  <fieldset><legend>Tax</legend>
+    {% include "taxes/_field.html" with f=form.tax_type %}
+    <div class="row2">
+      {% include "taxes/_field.html" with f=form.tax_amount %}
+      {% include "taxes/_field.html" with f=form.currency %}
+    </div>
+    <div class="row2">
+      {% include "taxes/_field.html" with f=form.period_start %}
+      {% include "taxes/_field.html" with f=form.period_end %}
+    </div>
+  </fieldset>
+
+  <fieldset><legend>Discount</legend>
+    <div class="row2">
+      {% include "taxes/_field.html" with f=form.discount_type %}
+      {% include "taxes/_field.html" with f=form.discount_value %}
+    </div>
+    {% include "taxes/_field.html" with f=form.discount_reason %}
+    <div class="help" id="discount-limit"></div>
+  </fieldset>
+
+  <fieldset><legend>Payment</legend>
+    {% include "taxes/_field.html" with f=form.payment_method %}
+    {% include "taxes/_field.html" with f=form.transaction_reference %}
+    {% include "taxes/_field.html" with f=form.notes %}
+  </fieldset>
+
+  <div class="card summary">To pay: <span id="to-pay">0.00</span></div>
+  <button class="btn block" type="submit" id="submit-btn">Save payment &amp; show receipt</button>
+</form>
+</div>
+{{ tax_types|json_script:"tax-types" }}
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const taxTypes = JSON.parse($("tax-types").textContent);
+  const form = $("collection-form");
+  const box = $("gps");
+
+  // --- GPS: latitude, longitude, altitude and accuracy from the phone ---
+  function setGps(pos) {
+    const c = pos.coords;
+    $("id_latitude").value = c.latitude.toFixed(6);
+    $("id_longitude").value = c.longitude.toFixed(6);
+    $("id_altitude").value = c.altitude == null ? "" : c.altitude.toFixed(1);
+    $("id_gps_accuracy").value = c.accuracy == null ? "" : c.accuracy.toFixed(1);
+    box.className = "gps ok";
+    box.textContent = "📍 " + c.latitude.toFixed(5) + ", " + c.longitude.toFixed(5) +
+      (c.altitude == null ? " · altitude not available" : " · alt " + c.altitude.toFixed(0) + " m") +
+      " · ±" + Math.round(c.accuracy) + " m";
+  }
+  function gpsError(err) {
+    box.className = "gps";
+    box.textContent = "⚠️ Location not available (" + err.message + "). " +
+      (location.protocol !== "https:" && location.hostname !== "localhost"
+        ? "Phones only share location over HTTPS. " : "") +
+      "You can still save the payment.";
+  }
+  function getGps() {
+    if (!navigator.geolocation) { gpsError({message: "not supported"}); return; }
+    navigator.geolocation.getCurrentPosition(setGps, gpsError,
+      {enableHighAccuracy: true, timeout: 20000, maximumAge: 30000});
+  }
+  $("gps-retry").addEventListener("click", getGps);
+  getGps();
+
+  // --- Defaults from tax type, live total ---
+  const amount = $("id_tax_amount"), currency = $("id_currency");
+  const dType = $("id_discount_type"), dValue = $("id_discount_value");
+  $("id_tax_type").addEventListener("change", function () {
+    const t = taxTypes[this.value];
+    if (!t) return;
+    if (!amount.value || Number(amount.value) === 0) amount.value = t.amount;
+    currency.value = t.currency;
+    $("discount-limit").textContent = Number(t.max_discount) > 0
+      ? "Collector discount limit for this tax: " + t.max_discount + "%" : "";
+    recalc();
+  });
+  function recalc() {
+    const a = parseFloat(amount.value) || 0, v = parseFloat(dValue.value) || 0;
+    let d = dType.value === "PERCENT" ? a * v / 100 : dType.value === "FIXED" ? v : 0;
+    d = Math.min(d, a);
+    $("to-pay").textContent = (a - d).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) + " " + currency.value;
+  }
+  [amount, currency, dType, dValue].forEach((el) => el.addEventListener("input", recalc));
+  recalc();
+
+  // --- Fill payer details from a registered taxpayer ---
+  $("id_taxpayer").addEventListener("change", function () {
+    const opt = this.options[this.selectedIndex];
+    if (this.value && !$("id_payer_name").value) $("id_payer_name").value = opt.text.replace(/\s*\[.*\]$/, "");
+  });
+
+  // Stop double taps from sending twice.
+  form.addEventListener("submit", () => { $("submit-btn").disabled = true; $("submit-btn").textContent = "Saving…"; });
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,31 @@
+{% extends "base.html" %}{% load humanize %}
+{% block title %}My day{% endblock %}
+{% block content %}
+<h1>Salaan, {{ user.first_name|default:user.username }}</h1>
+<div class="grid">
+  <div class="card stat"><div class="label">Payments today</div><div class="value">{{ today_count }}</div></div>
+  {% for t in today_totals %}
+  <div class="card stat"><div class="label">Collected today ({{ t.currency }})</div><div class="value">{{ t.total|floatformat:2|intcomma }}</div></div>
+  {% empty %}
+  <div class="card stat"><div class="label">Collected today</div><div class="value">0</div></div>
+  {% endfor %}
+</div>
+{% if user.can_collect %}
+<p><a class="btn block" href="{% url 'collection_create' %}">+ Record a new payment</a></p>
+<p><a class="btn secondary block" href="{% url 'taxpayer_create' %}">Register a taxpayer</a></p>
+{% endif %}
+<h2>My recent payments</h2>
+<div class="card table-wrap">
+<table>
+  <thead><tr><th>Receipt</th><th>Time</th><th>Payer</th><th>Tax</th><th class="num">Paid</th><th>Status</th></tr></thead>
+  <tbody>
+  {% for c in recent %}
+    <tr><td><a href="{% url 'receipt' c.receipt_number %}">{{ c.receipt_number }}</a></td>
+      <td>{{ c.collected_at|date:"d M H:i" }}</td><td>{{ c.payer_name }}</td><td>{{ c.tax_type.name }}</td>
+      <td class="num">{{ c.amount_paid|floatformat:2|intcomma }} {{ c.currency }}</td>
+      <td><span class="badge {{ c.status }}">{{ c.get_status_display }}</span></td></tr>
+  {% empty %}<tr><td colspan="6" class="muted">No payments yet.</td></tr>{% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

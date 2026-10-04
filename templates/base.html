@@ -1,0 +1,33 @@
+{% load static %}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#006d3b">
+  <title>{% block title %}Tax System{% endblock %} · Hargeisa Local Government</title>
+  <link rel="stylesheet" href="{% static 'css/app.css' %}">
+  {% block head %}{% endblock %}
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="{% url 'home' %}">Hargeisa Tax System</a>
+    {% if user.is_authenticated %}
+    <nav>
+      {% if user.can_collect %}<a href="{% url 'collector_home' %}">My day</a>
+      <a href="{% url 'collection_create' %}">+ New payment</a>{% endif %}
+      <a href="{% url 'collection_list' %}">Collections</a>
+      {% if user.can_view_reports %}<a href="{% url 'dashboard' %}">Dashboard</a>
+      <a href="{% url 'collection_map' %}">Map</a>{% endif %}
+      {% if user.is_staff %}<a href="{% url 'admin:index' %}">Admin</a>{% endif %}
+      <span title="{{ user.get_role_display }}">{{ user.employee_id|default:user.username }}</span>
+      <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button type="submit">Log out</button></form>
+    </nav>
+    {% endif %}
+  </header>
+  <main>
+    {% for message in messages %}<div class="msg {{ message.tags }}">{{ message }}</div>{% endfor %}
+    {% block content %}{% endblock %}
+  </main>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

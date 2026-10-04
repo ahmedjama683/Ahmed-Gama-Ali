@@ -1,0 +1,31 @@
+{% extends "base.html" %}{% load humanize %}
+{% block title %}Receipt {{ c.receipt_number }}{% endblock %}
+{% block content %}
+<div class="card receipt">
+  <h2>Hargeisa Local Government</h2>
+  <div class="center muted">Official tax receipt</div>
+  <div class="center"><strong>{{ c.receipt_number }}</strong></div>
+  {% if c.status == "VOIDED" %}<div class="voided-stamp">VOIDED – {{ c.void_reason }}</div>{% endif %}
+  <dl>
+    <dt>Date</dt><dd>{{ c.collected_at|date:"d M Y H:i" }}</dd>
+    <dt>Payer</dt><dd>{{ c.payer_name }}</dd>
+    {% if c.taxpayer %}<dt>Taxpayer no.</dt><dd>{{ c.taxpayer.taxpayer_number }}</dd>{% endif %}
+    <dt>Tax</dt><dd>{{ c.tax_type.name }}</dd>
+    <dt>Department</dt><dd>{{ c.department.name }}</dd>
+    {% if c.period_start %}<dt>Period</dt><dd>{{ c.period_start|date:"d M Y" }} – {{ c.period_end|date:"d M Y" }}</dd>{% endif %}
+    <dt>Location</dt><dd>{{ c.village.name }}, {{ c.village.district.name }}, {{ c.village.city.name }}, {{ c.village.region.name }}, {{ c.village.country.name }}</dd>
+    <dt>Amount</dt><dd>{{ c.tax_amount|floatformat:2|intcomma }} {{ c.currency }}</dd>
+    {% if c.discount_amount %}<dt>Discount</dt><dd>−{{ c.discount_amount|floatformat:2|intcomma }} ({{ c.discount_reason }})</dd>{% endif %}
+    <dt>Payment</dt><dd>{{ c.get_payment_method_display }}{% if c.transaction_reference %} · {{ c.transaction_reference }}{% endif %}</dd>
+    <dt>Collector</dt><dd>{{ c.collector.get_full_name|default:c.collector.username }} ({{ c.collector.employee_id }})</dd>
+    {% if c.latitude %}<dt>GPS</dt><dd>{{ c.latitude }}, {{ c.longitude }}{% if c.altitude is not None %} · {{ c.altitude }} m{% endif %}</dd>{% endif %}
+  </dl>
+  <div class="total center">PAID {{ c.amount_paid|floatformat:2|intcomma }} {{ c.currency }}</div>
+  <p class="center muted">Mahadsanid · Thank you</p>
+</div>
+<div class="narrow no-print">
+  <p><button class="btn block" onclick="window.print()">Print receipt</button></p>
+  {% if user.can_collect %}<p><a class="btn secondary block" href="{% url 'collection_create' %}">Record another payment</a></p>{% endif %}
+  {% if user.can_void and c.status != "VOIDED" %}<p><a class="btn danger block" href="{% url 'collection_void' c.pk %}">Void this receipt</a></p>{% endif %}
+</div>
+{% endblock %}

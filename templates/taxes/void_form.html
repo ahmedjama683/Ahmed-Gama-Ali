@@ -1,0 +1,13 @@
+{% extends "base.html" %}{% load humanize %}
+{% block title %}Void {{ c.receipt_number }}{% endblock %}
+{% block content %}
+<div class="narrow card">
+  <h1>Void receipt {{ c.receipt_number }}</h1>
+  <p>{{ c.payer_name }} · {{ c.amount_paid|floatformat:2|intcomma }} {{ c.currency }} · collected by {{ c.collector }}</p>
+  <p class="muted">The payment stays in the records marked as voided. This is logged.</p>
+  <form method="post">{% csrf_token %}
+    <div class="field"><label for="id_reason">Reason *</label>{{ form.reason }}{{ form.reason.errors }}</div>
+    <button class="btn danger block" type="submit">Void receipt</button>
+  </form>
+</div>
+{% endblock %}

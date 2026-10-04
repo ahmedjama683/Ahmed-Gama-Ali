@@ -1,0 +1,326 @@
+import uuid
+from decimal import ROUND_HALF_UP, Decimal
+
+from django.conf import settings
+from django.core.exceptions import ValidationError
+from django.core.validators import MaxValueValidator, MinValueValidator
+from django.db import models, transaction
+from django.utils import timezone
+
+from accounts.models import Department
+from locations.models import Village
+
+CENTS = Decimal("0.01")
+
+
+class Currency(models.TextChoices):
+    SLSH = "SLSH", "Somaliland Shilling"
+    USD = "USD", "US Dollar"
+
+
+class PaymentMethod(models.TextChoices):
+    CASH = "CASH", "Cash"
+    ZAAD = "ZAAD", "ZAAD (Telesom)"
+    EDAHAB = "EDAHAB", "eDahab (Somtel)"
+    BANK = "BANK", "Bank transfer"
+    CHEQUE = "CHEQUE", "Cheque"
+    OTHER = "OTHER", "Other"
+
+
+# Payment methods that must carry a transaction reference so they can be reconciled.
+REFERENCE_REQUIRED = {PaymentMethod.ZAAD, PaymentMethod.EDAHAB, PaymentMethod.BANK, PaymentMethod.CHEQUE}
+
+
+class TaxType(models.Model):
+    """A kind of tax or fee, e.g. property tax, business licence, market fee."""
+
+    class Frequency(models.TextChoices):
+        ONE_OFF = "ONE_OFF", "One-off"
+        DAILY = "DAILY", "Daily"
+        MONTHLY = "MONTHLY", "Monthly"
+        QUARTERLY = "QUARTERLY", "Quarterly"
+        ANNUAL = "ANNUAL", "Annual"
+
+    code = models.CharField(max_length=20, unique=True)
+    name = models.CharField(max_length=150)
+    department = models.ForeignKey(Department, on_delete=models.PROTECT, related_name="tax_types")
+    default_amount = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    currency = models.CharField(max_length=4, choices=Currency.choices, default=Currency.SLSH)
+    frequency = models.CharField(max_length=10, choices=Frequency.choices, default=Frequency.ANNUAL)
+    max_collector_discount_percent = models.DecimalField(
+        max_digits=5, decimal_places=2, default=0,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+        help_text="Largest discount a collector may give without a supervisor.",
+    )
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["department__name", "name"]
+
+    def __str__(self):
+        return f"{self.name} ({self.code})"
+
+
+class Taxpayer(models.Model):
+    """A person or business that pays tax. Optional for walk-in payments."""
+
+    class Kind(models.TextChoices):
+        INDIVIDUAL = "INDIVIDUAL", "Individual"
+        BUSINESS = "BUSINESS", "Business"
+        ORGANISATION = "ORGANISATION", "Organisation / NGO"
+
+    taxpayer_number = models.CharField(max_length=20, unique=True, editable=False)
+    kind = models.CharField(max_length=15, choices=Kind.choices, default=Kind.INDIVIDUAL)
+    name = models.CharField(max_length=200)
+    business_name = models.CharField(max_length=200, blank=True)
+    national_id = models.CharField(max_length=50, blank=True, db_index=True)
+    phone = models.CharField(max_length=30, blank=True, db_index=True)
+    village = models.ForeignKey(Village, on_delete=models.PROTECT, related_name="taxpayers")
+    address = models.CharField(max_length=255, blank=True)
+    property_number = models.CharField(max_length=50, blank=True, db_index=True)
+    latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="+",
+    )
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        label = self.business_name or self.name
+        return f"{label} [{self.taxpayer_number}]"
+
+    def save(self, *args, **kwargs):
+        if not self.taxpayer_number:
+            # Temporary unique value; replaced by the id-based number below.
+            self.taxpayer_number = f"TMP-{uuid.uuid4().hex[:12]}"
+            with transaction.atomic():
+                super().save(*args, **kwargs)
+                self.taxpayer_number = f"TP-{self.pk:08d}"
+                super().save(update_fields=["taxpayer_number"])
+            return
+        super().save(*args, **kwargs)
+
+
+class TaxCollection(models.Model):
+    """
+    One payment received by a tax collector. Rows are never edited or
+    deleted after creation; mistakes are corrected by voiding, which keeps
+    a full trail for auditors.
+    """
+
+    class Status(models.TextChoices):
+        COMPLETED = "COMPLETED", "Completed"
+        VOIDED = "VOIDED", "Voided"
+
+    class DiscountType(models.TextChoices):
+        NONE = "NONE", "No discount"
+        PERCENT = "PERCENT", "Percentage"
+        FIXED = "FIXED", "Fixed amount"
+
+    # Identity
+    receipt_number = models.CharField(max_length=30, unique=True, editable=False)
+    client_uuid = models.UUIDField(
+        default=uuid.uuid4, unique=True,
+        help_text="Generated by the device; stops the same payment being saved twice "
+                  "when a phone retries on a bad connection.",
+    )
+
+    # Who collected it
+    collector = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="collections"
+    )
+    department = models.ForeignKey(Department, on_delete=models.PROTECT, related_name="collections")
+
+    # Who paid and what for
+    taxpayer = models.ForeignKey(
+        Taxpayer, on_delete=models.PROTECT, null=True, blank=True, related_name="collections"
+    )
+    payer_name = models.CharField(max_length=200)
+    payer_phone = models.CharField(max_length=30, blank=True)
+    tax_type = models.ForeignKey(TaxType, on_delete=models.PROTECT, related_name="collections")
+    period_start = models.DateField(null=True, blank=True)
+    period_end = models.DateField(null=True, blank=True)
+
+    # Money
+    currency = models.CharField(max_length=4, choices=Currency.choices, default=Currency.SLSH)
+    tax_amount = models.DecimalField(
+        max_digits=14, decimal_places=2, validators=[MinValueValidator(Decimal("0.01"))]
+    )
+    discount_type = models.CharField(
+        max_length=10, choices=DiscountType.choices, default=DiscountType.NONE
+    )
+    discount_value = models.DecimalField(
+        max_digits=14, decimal_places=2, default=0, validators=[MinValueValidator(0)]
+    )
+    discount_reason = models.CharField(max_length=255, blank=True)
+    discount_amount = models.DecimalField(max_digits=14, decimal_places=2, default=0, editable=False)
+    amount_paid = models.DecimalField(max_digits=14, decimal_places=2, default=0, editable=False)
+    payment_method = models.CharField(
+        max_length=10, choices=PaymentMethod.choices, default=PaymentMethod.CASH
+    )
+    transaction_reference = models.CharField(
+        max_length=100, blank=True, help_text="ZAAD / eDahab / bank transaction ID."
+    )
+
+    # When and where
+    collected_at = models.DateTimeField(default=timezone.now, db_index=True)
+    village = models.ForeignKey(Village, on_delete=models.PROTECT, related_name="collections")
+    latitude = models.DecimalField(
+        max_digits=9, decimal_places=6, null=True, blank=True,
+        validators=[MinValueValidator(-90), MaxValueValidator(90)],
+    )
+    longitude = models.DecimalField(
+        max_digits=9, decimal_places=6, null=True, blank=True,
+        validators=[MinValueValidator(-180), MaxValueValidator(180)],
+    )
+    altitude = models.DecimalField(
+        "Altitude (m)", max_digits=7, decimal_places=1, null=True, blank=True
+    )
+    gps_accuracy = models.DecimalField(
+        "GPS accuracy (m)", max_digits=7, decimal_places=1, null=True, blank=True
+    )
+
+    # Lifecycle
+    status = models.CharField(max_length=10, choices=Status.choices, default=Status.COMPLETED)
+    notes = models.TextField(blank=True)
+    void_reason = models.CharField(max_length=255, blank=True)
+    voided_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True,
+        related_name="voided_collections",
+    )
+    voided_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-collected_at"]
+        indexes = [
+            models.Index(fields=["collector", "collected_at"]),
+            models.Index(fields=["department", "collected_at"]),
+            models.Index(fields=["status", "collected_at"]),
+            models.Index(fields=["village", "collected_at"]),
+            models.Index(fields=["payment_method", "collected_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.receipt_number} - {self.payer_name} - {self.amount_paid} {self.currency}"
+
+    # --- Calculations -----------------------------------------------------
+
+    def compute_discount(self):
+        amount = self.tax_amount or Decimal(0)
+        value = self.discount_value or Decimal(0)
+        if self.discount_type == self.DiscountType.PERCENT:
+            discount = amount * value / Decimal(100)
+        elif self.discount_type == self.DiscountType.FIXED:
+            discount = value
+        else:
+            discount = Decimal(0)
+        return discount.quantize(CENTS, rounding=ROUND_HALF_UP)
+
+    @property
+    def discount_percent(self):
+        if not self.tax_amount:
+            return Decimal(0)
+        return (self.compute_discount() * 100 / self.tax_amount).quantize(CENTS)
+
+    # --- Validation -------------------------------------------------------
+
+    def clean(self):
+        errors = {}
+        if self.tax_amount is not None:
+            if self.discount_type == self.DiscountType.NONE and self.discount_value:
+                errors["discount_value"] = "Choose a discount type or leave the value at 0."
+            if self.discount_type == self.DiscountType.PERCENT and self.discount_value > 100:
+                errors["discount_value"] = "A percentage discount cannot exceed 100%."
+            if self.compute_discount() > self.tax_amount:
+                errors["discount_value"] = "The discount cannot be larger than the tax amount."
+            if self.compute_discount() > 0 and not self.discount_reason.strip():
+                errors["discount_reason"] = "Give a reason for the discount."
+            collector = getattr(self, "collector", None) if self.collector_id else None
+            tax_type = getattr(self, "tax_type", None) if self.tax_type_id else None
+            if (
+                collector and tax_type and self.tax_amount
+                and not collector.can_give_unlimited_discount
+                and self.discount_percent > tax_type.max_collector_discount_percent
+            ):
+                errors["discount_value"] = (
+                    f"Collectors may give at most {tax_type.max_collector_discount_percent}% "
+                    f"discount on {tax_type.name}. Ask a supervisor."
+                )
+        if self.payment_method in REFERENCE_REQUIRED and not self.transaction_reference.strip():
+            errors["transaction_reference"] = "Enter the transaction reference for this payment."
+        if self.period_start and self.period_end and self.period_end < self.period_start:
+            errors["period_end"] = "The period end must be after the start."
+        if (self.latitude is None) != (self.longitude is None):
+            errors["latitude"] = "Latitude and longitude must be given together."
+        if errors:
+            raise ValidationError(errors)
+
+    # --- Persistence ------------------------------------------------------
+
+    def save(self, *args, **kwargs):
+        self.discount_amount = self.compute_discount()
+        self.amount_paid = (self.tax_amount - self.discount_amount).quantize(CENTS)
+        if not self.department_id and self.tax_type_id:
+            self.department_id = self.tax_type.department_id
+        if not self.receipt_number:
+            self.receipt_number = f"TMP-{uuid.uuid4().hex[:20]}"
+            with transaction.atomic():
+                super().save(*args, **kwargs)
+                year = timezone.localtime(self.collected_at).year
+                self.receipt_number = f"HGA-{year}-{self.pk:08d}"
+                super().save(update_fields=["receipt_number"])
+            return
+        super().save(*args, **kwargs)
+
+    def void(self, user, reason):
+        if self.status == self.Status.VOIDED:
+            raise ValidationError("This collection is already voided.")
+        if not reason.strip():
+            raise ValidationError("A reason is required to void a collection.")
+        self.status = self.Status.VOIDED
+        self.void_reason = reason.strip()
+        self.voided_by = user
+        self.voided_at = timezone.now()
+        self.save(update_fields=["status", "void_reason", "voided_by", "voided_at"])
+
+
+class AuditLog(models.Model):
+    """Append-only record of important actions (logins, payments, voids)."""
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name="+"
+    )
+    action = models.CharField(max_length=50, db_index=True)
+    object_type = models.CharField(max_length=50, blank=True)
+    object_id = models.CharField(max_length=50, blank=True)
+    details = models.JSONField(default=dict, blank=True)
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.created_at:%Y-%m-%d %H:%M} {self.user} {self.action} {self.object_type}:{self.object_id}"
+
+    @classmethod
+    def record(cls, request, action, obj=None, **details):
+        ip = None
+        if request is not None:
+            forwarded = request.META.get("HTTP_X_FORWARDED_FOR")
+            ip = forwarded.split(",")[0].strip() if forwarded else request.META.get("REMOTE_ADDR")
+        user = getattr(request, "user", None)
+        return cls.objects.create(
+            user=user if user is not None and user.is_authenticated else None,
+            action=action,
+            object_type=obj.__class__.__name__ if obj is not None else "",
+            object_id=str(obj.pk) if obj is not None else "",
+            details=details,
+            ip_address=ip or None,
+        )

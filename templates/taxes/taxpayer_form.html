@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Register taxpayer{% endblock %}
+{% block content %}
+<div class="narrow">
+<h1>Register a taxpayer</h1>
+<form method="post" class="card">
+  {% csrf_token %}
+  {% for h in form.hidden_fields %}{{ h }}{% endfor %}
+  {% for f in form.visible_fields %}{% include "taxes/_field.html" %}{% endfor %}
+  <p class="help" id="gps">Location will be saved if the phone allows it.</p>
+  <button class="btn block" type="submit">Save taxpayer</button>
+</form>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+if (navigator.geolocation) navigator.geolocation.getCurrentPosition(function (p) {
+  document.getElementById("id_latitude").value = p.coords.latitude.toFixed(6);
+  document.getElementById("id_longitude").value = p.coords.longitude.toFixed(6);
+  document.getElementById("gps").textContent = "📍 Location captured.";
+}, function () {}, {enableHighAccuracy: true, timeout: 15000});
+</script>
+{% endblock %}
