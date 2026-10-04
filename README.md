@@ -183,17 +183,15 @@ This is what makes it work on every collector's phone. You need:
 1. **A server (VPS)**: Ubuntu 24.04, 2 CPU, 4 GB RAM, 80 GB disk is plenty to start. Any provider works (local Somaliland data centres, or Hetzner, DigitalOcean, AWS…). Government data-hosting rules may say where it must be.
 2. **A domain name.** This deployment uses `tax.pillarsdo.org`. Where `pillarsdo.org` is managed, add a DNS record: **Type** `A`, **Name** `tax`, **Value** the server's IP address.
 
-**Easiest: the one-command installer.** The repository is private, so first create
-a GitHub *fine-grained* access token with **read-only "Contents" access to this one
-repository** (GitHub → Settings → Developer settings → Personal access tokens).
-Then, on a fresh Ubuntu 24.04 server, after the DNS A record points to it:
+**Easiest: the one-command installer.** On a fresh Ubuntu 24.04 server, after the DNS A record points to it:
 
 ```bash
-export GITHUB_TOKEN=<paste-token-here>
-curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
-  https://raw.githubusercontent.com/ahmedjama683/Ahmed-Gama-Ali/master/deploy/install.sh -o install.sh
-sudo GITHUB_TOKEN="$GITHUB_TOKEN" bash install.sh
+curl -fsSL https://raw.githubusercontent.com/ahmedjama683/Ahmed-Gama-Ali/master/deploy/install.sh -o install.sh
+sudo bash install.sh
 ```
+
+(If the repository is ever made private, add a read-only GitHub token:
+`sudo GITHUB_TOKEN=<token> bash install.sh`.)
 
 It asks for the domain, then:
 * installs Docker and a firewall
@@ -209,8 +207,8 @@ It asks for the domain, then:
 # 1. Install Docker
 curl -fsSL https://get.docker.com | sh
 
-# 2. Get the code (private repository: use a read-only access token)
-git clone https://x-access-token:<token>@github.com/ahmedjama683/Ahmed-Gama-Ali.git /opt/tax && cd /opt/tax
+# 2. Get the code
+git clone https://github.com/ahmedjama683/Ahmed-Gama-Ali.git /opt/tax && cd /opt/tax
 
 # 3. Configure
 cp .env.example .env

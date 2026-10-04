@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # One-command installer for a fresh Ubuntu 24.04 server.
 #
-# The repository is private, so a read-only GitHub access token is needed:
-#   export GITHUB_TOKEN=<token>
-#   curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
-#     https://raw.githubusercontent.com/ahmedjama683/Ahmed-Gama-Ali/master/deploy/install.sh -o install.sh
-#   sudo GITHUB_TOKEN="$GITHUB_TOKEN" bash install.sh
+#   curl -fsSL https://raw.githubusercontent.com/ahmedjama683/Ahmed-Gama-Ali/master/deploy/install.sh -o install.sh
+#   sudo bash install.sh
+#
+# If the repository is ever made private, pass a read-only GitHub token:
+#   sudo GITHUB_TOKEN=<token> bash install.sh
 #
 # Before running: point your domain's DNS "A record" at this server's IP
 # address, otherwise the free HTTPS certificate cannot be issued.
@@ -25,10 +25,7 @@ read -rp "Client government name [Hargeisa Local Government]: " CLIENT_NAME
 CLIENT_NAME="${CLIENT_NAME:-Hargeisa Local Government}"
 read -rp "Receipt number prefix [HGA]: " RECEIPT_PREFIX
 RECEIPT_PREFIX="${RECEIPT_PREFIX:-HGA}"
-if [ -z "${GITHUB_TOKEN:-}" ]; then
-  read -rsp "GitHub access token for the private repository: " GITHUB_TOKEN
-  echo
-fi
+GITHUB_TOKEN="${GITHUB_TOKEN:-}"  # only needed if the repository is private
 
 SERVER_IP="$(curl -fsS https://api.ipify.org || true)"
 DNS_IP="$(getent ahostsv4 "$DOMAIN" | awk 'NR==1 {print $1}' || true)"
