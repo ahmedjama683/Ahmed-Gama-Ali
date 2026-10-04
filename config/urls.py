@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.contrib import admin
 from django.contrib.auth import views as auth_views
+from django.http import HttpResponse
 from django.urls import include, path
 from rest_framework.authtoken.views import obtain_auth_token
 from rest_framework.routers import DefaultRouter
@@ -16,7 +17,15 @@ router.register("villages", api.VillageViewSet, basename="village")
 admin.site.site_header = f"{settings.CLIENT_NAME} – {settings.SYSTEM_NAME}"
 admin.site.site_title = "Tax System Admin"
 
+
+
+def robots_txt(request):
+    # Staff-only system: ask search engines not to list any page.
+    return HttpResponse("User-agent: *\nDisallow: /\n", content_type="text/plain")
+
+
 urlpatterns = [
+    path("robots.txt", robots_txt),
     path("", views.home, name="home"),
     path("login/", auth_views.LoginView.as_view(), name="login"),
     path("logout/", auth_views.LogoutView.as_view(), name="logout"),

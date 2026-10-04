@@ -1,13 +1,16 @@
 # Hargeisa Local Government – Tax Collection System
 
-An open-source web platform that replaces manual (paper) tax collection for the
-Hargeisa local government in Somaliland. Tax collectors record payments on
-their phones in the field, with GPS. It is designed to be run by a service
-company on behalf of a municipality (see [Running it for a client](#running-it-for-a-client-operator-model)). Supervisors follow their collectors'
-performance, Treasury and Audit see the financial numbers, and the Executive
-director sees a live map of where collectors are.
+> **Confidential.** This system is provided to the government under contract.
+> Do not share the code, documentation or server details publicly.
 
-Built only with free, open-source software: **Python / Django**, **PostgreSQL**,
+A web platform that replaces manual (paper) tax collection for the Hargeisa
+local government in Somaliland. Tax collectors record payments on their phones
+in the field, with GPS. Supervisors follow their collectors' performance,
+Treasury and Audit see the financial numbers, and the Executive director sees a
+live map of where collectors are. To its users, the system presents itself only
+as the government's own.
+
+Built on free, open-source components: **Python / Django**, **PostgreSQL**,
 **Gunicorn**, **Caddy**, **Chart.js** and **Leaflet/OpenStreetMap**.
 
 ---
@@ -178,13 +181,18 @@ Run the tests: `python manage.py test`
 This is what makes it work on every collector's phone. You need:
 
 1. **A server (VPS)**: Ubuntu 24.04, 2 CPU, 4 GB RAM, 80 GB disk is plenty to start. Any provider works (local Somaliland data centres, or Hetzner, DigitalOcean, AWS…). Government data-hosting rules may say where it must be.
-2. **A domain name.** This deployment uses `tax.pillarsdo.org`, a subdomain of the operator's domain `pillarsdo.org`. In the DNS settings where `pillarsdo.org` is managed, add a record: **Type** `A`, **Name** `tax`, **Value** the server's IP address. The main `pillarsdo.org` website is not affected.
+2. **A domain name.** This deployment uses `tax.pillarsdo.org`. Where `pillarsdo.org` is managed, add a DNS record: **Type** `A`, **Name** `tax`, **Value** the server's IP address.
 
-**Easiest: the one-command installer.** On a fresh Ubuntu 24.04 server, after the DNS A record points to it:
+**Easiest: the one-command installer.** The repository is private, so first create
+a GitHub *fine-grained* access token with **read-only "Contents" access to this one
+repository** (GitHub → Settings → Developer settings → Personal access tokens).
+Then, on a fresh Ubuntu 24.04 server, after the DNS A record points to it:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ahmedjama683/Ahmed-Gama-Ali/master/deploy/install.sh -o install.sh
-sudo bash install.sh
+export GITHUB_TOKEN=<paste-token-here>
+curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
+  https://raw.githubusercontent.com/ahmedjama683/Ahmed-Gama-Ali/master/deploy/install.sh -o install.sh
+sudo GITHUB_TOKEN="$GITHUB_TOKEN" bash install.sh
 ```
 
 It asks for the domain, then:
@@ -201,8 +209,8 @@ It asks for the domain, then:
 # 1. Install Docker
 curl -fsSL https://get.docker.com | sh
 
-# 2. Get the code
-git clone <this-repository-url> /opt/tax && cd /opt/tax
+# 2. Get the code (private repository: use a read-only access token)
+git clone https://x-access-token:<token>@github.com/ahmedjama683/Ahmed-Gama-Ali.git /opt/tax && cd /opt/tax
 
 # 3. Configure
 cp .env.example .env
@@ -250,37 +258,26 @@ screen" in Chrome so it opens like an app.
 
 ---
 
-## Running it for a client (operator model)
+## Deployment settings
 
-The system is designed to be run by a company **on behalf of** a municipality.
-
-**Branding.** Set these in `.env` (the installer asks for them):
+**Branding.** Everything users see (top bar, page titles, footer, receipts) names
+only the government. Set these in `.env` (the installer asks for the main ones):
 
 | Setting | Example | Shown |
 |---------|---------|-------|
-| `CLIENT_NAME` | Hargeisa Local Government | Receipts, page titles, admin |
-| `OPERATOR_NAME` | Pillar Social Development Organization | Footer and receipts: "System operated by …" |
+| `CLIENT_NAME` | Hargeisa Local Government | Receipts, page titles, footer, admin |
 | `SYSTEM_NAME` | Hargeisa Tax System | Top bar |
 | `RECEIPT_PREFIX` | HGA | Receipt numbers, e.g. `HGA-2026-00000123` |
 | `MAP_CENTER` | 9.5624,44.0770 | Where the tracker map opens |
 
-**One installation per municipality.** To serve another city, install a separate
-copy on its own server (or another subdomain, e.g. `berbera-tax.pillarsdo.org`) with its own
-`.env` and database. Each client's data stays fully separate.
+**Not public.** Search engines are told not to list any page (`robots.txt`, a
+`noindex` tag on every page and a `noindex` header from the web server). Only staff
+with accounts can see anything beyond the login page.
 
-**Points to agree in the contract with the municipality:**
-* **Data ownership.** All taxpayer and payment data belongs to the municipality. The company processes it only to run the service.
-* **Money flow.** Payments go straight to the municipality's own accounts (its ZAAD/eDahab merchant numbers and bank account), never through the company. The system only records them.
-* **Who has which role.** Executive director, Treasury and Audit accounts are municipal staff. Company staff should only have Admin accounts, for support.
-* **Exit and handover.** If the contract ends, the municipality receives a full database export and the code. The MIT licence already lets them keep using it.
-* **Backups and uptime.** How often backups are taken, where copies are kept, and how quickly problems are fixed.
-* **Location tracking.** Collectors are told in writing that their location is recorded during shifts, and how long it is kept (default 90 days).
+**One installation per municipality.** Another city gets its own server or
+subdomain, its own `.env` and its own database, so data never mixes.
 
-**Private repository.** If your company keeps the code private on GitHub, create a
-read-only *fine-grained* access token for this one repository and paste it when the
-installer asks.
-
-
+## Roadmap ideas
 
 * **Android app** for background location tracking and offline payments (the API is ready).
 * **Collection targets** per collector, with % achieved on the performance page.
@@ -306,4 +303,4 @@ deploy/       Caddy (HTTPS) config, backup script
 
 ## License
 
-MIT. Free to use, change and share.
+Proprietary and confidential. See [LICENSE](LICENSE).

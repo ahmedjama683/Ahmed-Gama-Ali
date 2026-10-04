@@ -330,12 +330,17 @@ class TrackingTests(BaseCase):
 
 
 class BrandingTests(BaseCase):
-    def test_client_operator_and_prefix_from_settings(self):
-        with self.settings(CLIENT_NAME="Berbera Local Government", OPERATOR_NAME="Example Tech Ltd",
-                           RECEIPT_PREFIX="BRB"):
+    def test_client_name_and_prefix_from_settings(self):
+        with self.settings(CLIENT_NAME="Berbera Local Government", RECEIPT_PREFIX="BRB"):
             c = self.make()
             self.assertRegex(c.receipt_number, r"^BRB-\d{4}-\d{8}$")
             self.client.force_login(self.collector)
             page = self.client.get(reverse("receipt", args=[c.receipt_number]))
             self.assertContains(page, "Berbera Local Government")
-            self.assertContains(page, "operated by Example Tech Ltd")
+            self.assertNotContains(page, "operated by")
+
+    def test_hidden_from_search_engines(self):
+        r = self.client.get("/robots.txt")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("Disallow: /", r.content.decode())
+        self.assertContains(self.client.get(reverse("login")), 'content="noindex, nofollow"')

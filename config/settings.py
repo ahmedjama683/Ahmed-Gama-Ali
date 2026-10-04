@@ -151,12 +151,10 @@ LOGGING = {
     "root": {"handlers": ["console"], "level": "INFO"},
 }
 
-# Branding. Set these per deployment so the same code can serve other
-# municipalities: CLIENT_NAME is the government that owns the taxes,
-# OPERATOR_NAME the company that runs the system for it.
+# Branding. Everything users see presents the system as the government's own.
+# Set per deployment so the same code can serve other municipalities.
 SYSTEM_NAME = os.environ.get("SYSTEM_NAME", "Hargeisa Tax System")
 CLIENT_NAME = os.environ.get("CLIENT_NAME", "Hargeisa Local Government")
-OPERATOR_NAME = os.environ.get("OPERATOR_NAME", "Pillar Social Development Organization")
 RECEIPT_PREFIX = os.environ.get("RECEIPT_PREFIX", "HGA")
 # "latitude,longitude" where the tracker map opens.
 MAP_CENTER = [float(v) for v in os.environ.get("MAP_CENTER", "9.5624,44.0770").split(",")]

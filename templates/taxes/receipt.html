@@ -22,7 +22,6 @@
   </dl>
   <div class="total center">PAID {{ c.amount_paid|floatformat:2|intcomma }} {{ c.currency }}</div>
   <p class="center muted">Mahadsanid · Thank you</p>
-  {% if OPERATOR_NAME %}<p class="center muted" style="font-size: 12px">Issued through a system operated by {{ OPERATOR_NAME }} on behalf of {{ CLIENT_NAME }}</p>{% endif %}
 </div>
 <div class="narrow no-print">
   <p><button class="btn block" onclick="window.print()">Print receipt</button></p>

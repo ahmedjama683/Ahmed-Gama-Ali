@@ -1,6 +1,13 @@
-# SITE_ADDRESS is your domain (e.g. tax.pillarsdo.org). Caddy then fetches
-# a free Let's Encrypt certificate automatically. ":80" = plain HTTP (testing).
+# SITE_ADDRESS is the system's domain. Caddy fetches a free Let's Encrypt
+# certificate automatically. ":80" = plain HTTP (testing only).
 {$SITE_ADDRESS}
 
 encode gzip
+
+header {
+	# Staff-only system: keep every page out of search engines.
+	X-Robots-Tag "noindex, nofollow"
+	-Server
+}
+
 reverse_proxy web:8000

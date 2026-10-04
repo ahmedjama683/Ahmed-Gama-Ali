@@ -15,6 +15,5 @@ def branding(request):
     return {
         "SYSTEM_NAME": settings.SYSTEM_NAME,
         "CLIENT_NAME": settings.CLIENT_NAME,
-        "OPERATOR_NAME": settings.OPERATOR_NAME,
         "MAP_CENTER": settings.MAP_CENTER,
     }
