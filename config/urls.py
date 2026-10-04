@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.contrib import admin
 from django.contrib.auth import views as auth_views
 from django.urls import include, path
@@ -12,7 +13,7 @@ router.register("taxpayers", api.TaxpayerViewSet, basename="taxpayer")
 router.register("tax-types", api.TaxTypeViewSet, basename="taxtype")
 router.register("villages", api.VillageViewSet, basename="village")
 
-admin.site.site_header = "Hargeisa Local Government – Tax System"
+admin.site.site_header = f"{settings.CLIENT_NAME} – {settings.SYSTEM_NAME}"
 admin.site.site_title = "Tax System Admin"
 
 urlpatterns = [

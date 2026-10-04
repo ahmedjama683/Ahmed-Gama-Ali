@@ -33,7 +33,7 @@
   var COLORS = ["#006d3b", "#1f6feb", "#c8102e", "#8250df", "#d4a72c", "#0a8a8a", "#bf3989", "#6e7781"];
   var STATE = {online: "#1f9d55", stale: "#e0a100", off: "#9aa5a0"};
 
-  var map = L.map("map").setView([9.5624, 44.0770], 13);  // Hargeisa
+  var map = L.map("map").setView({{ MAP_CENTER|safe }}, 13);
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 19, attribution: "&copy; OpenStreetMap contributors"
   }).addTo(map);

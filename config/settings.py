@@ -1,5 +1,5 @@
 """
-Django settings for the Hargeisa Local Government Tax Collection System.
+Django settings for the municipal Tax Collection System (first deployment: Hargeisa).
 
 All deployment-specific values come from environment variables so the same
 code runs on a developer laptop (SQLite) and on a public server (PostgreSQL).
@@ -69,6 +69,7 @@ TEMPLATES = [
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
                 "taxes.context_processors.duty_shift",
+                "taxes.context_processors.branding",
             ],
         },
     },
@@ -149,3 +150,13 @@ LOGGING = {
     "handlers": {"console": {"class": "logging.StreamHandler"}},
     "root": {"handlers": ["console"], "level": "INFO"},
 }
+
+# Branding. Set these per deployment so the same code can serve other
+# municipalities: CLIENT_NAME is the government that owns the taxes,
+# OPERATOR_NAME the company that runs the system for it.
+SYSTEM_NAME = os.environ.get("SYSTEM_NAME", "Hargeisa Tax System")
+CLIENT_NAME = os.environ.get("CLIENT_NAME", "Hargeisa Local Government")
+OPERATOR_NAME = os.environ.get("OPERATOR_NAME", "")
+RECEIPT_PREFIX = os.environ.get("RECEIPT_PREFIX", "HGA")
+# "latitude,longitude" where the tracker map opens.
+MAP_CENTER = [float(v) for v in os.environ.get("MAP_CENTER", "9.5624,44.0770").split(",")]

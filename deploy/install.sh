@@ -16,8 +16,15 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 1
 fi
 
-read -rp "Domain name for the system (e.g. tax.dhhgov.org): " DOMAIN
+read -rp "Domain name for the system (e.g. tax.example.com): " DOMAIN
 if [ -z "$DOMAIN" ]; then echo "A domain is required." >&2; exit 1; fi
+read -rp "Client government name [Hargeisa Local Government]: " CLIENT_NAME
+CLIENT_NAME="${CLIENT_NAME:-Hargeisa Local Government}"
+read -rp "Operating company name (shown in the footer and on receipts, optional): " OPERATOR_NAME
+read -rp "Receipt number prefix [HGA]: " RECEIPT_PREFIX
+RECEIPT_PREFIX="${RECEIPT_PREFIX:-HGA}"
+read -rsp "GitHub access token (only if the repository is private, else press Enter): " GITHUB_TOKEN
+echo
 
 SERVER_IP="$(curl -fsS https://api.ipify.org || true)"
 DNS_IP="$(getent ahostsv4 "$DOMAIN" | awk 'NR==1 {print $1}' || true)"
@@ -43,7 +50,12 @@ echo "==> Getting the code into $APP_DIR"
 if [ -d "$APP_DIR/.git" ]; then
   git -C "$APP_DIR" pull --ff-only
 else
-  git clone "$REPO_URL" "$APP_DIR"
+  if [ -n "$GITHUB_TOKEN" ]; then
+    # A read-only, fine-grained token limited to this one repository is enough.
+    git clone "${REPO_URL/https:\/\//https://x-access-token:$GITHUB_TOKEN@}" "$APP_DIR"
+  else
+    git clone "$REPO_URL" "$APP_DIR"
+  fi
 fi
 cd "$APP_DIR"
 
@@ -62,6 +74,11 @@ POSTGRES_DB=tax
 POSTGRES_USER=tax
 POSTGRES_PASSWORD=$DB_PASSWORD
 SITE_ADDRESS=$DOMAIN
+SYSTEM_NAME=Tax Collection System
+CLIENT_NAME=$CLIENT_NAME
+OPERATOR_NAME=$OPERATOR_NAME
+RECEIPT_PREFIX=$RECEIPT_PREFIX
+MAP_CENTER=9.5624,44.0770
 EOF
   chmod 600 .env
 else

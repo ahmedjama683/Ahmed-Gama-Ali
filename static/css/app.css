@@ -129,3 +129,4 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
   .tracker .list { max-height: none; }
 }
 .bar { height: 8px; background: var(--primary); border-radius: 4px; min-width: 2px; }
+.site-footer { text-align: center; color: var(--muted); font-size: 13px; padding: 16px; }

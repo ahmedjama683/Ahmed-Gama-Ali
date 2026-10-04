@@ -4,13 +4,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#006d3b">
-  <title>{% block title %}Tax System{% endblock %} · Hargeisa Local Government</title>
+  <title>{% block title %}Tax System{% endblock %} · {{ CLIENT_NAME }}</title>
   <link rel="stylesheet" href="{% static 'css/app.css' %}">
   {% block head %}{% endblock %}
 </head>
 <body>
   <header class="top">
-    <a class="brand" href="{% url 'home' %}">Hargeisa Tax System</a>
+    <a class="brand" href="{% url 'home' %}">{{ SYSTEM_NAME }}</a>
     {% if user.is_authenticated %}
     <nav>
       {% if user.can_collect %}<a href="{% url 'collector_home' %}">My day</a>
@@ -33,6 +33,7 @@
     {% for message in messages %}<div class="msg {{ message.tags }}">{{ message }}</div>{% endfor %}
     {% block content %}{% endblock %}
   </main>
+  <footer class="site-footer no-print">{{ CLIENT_NAME }}{% if OPERATOR_NAME %} · System operated by {{ OPERATOR_NAME }}{% endif %}</footer>
   {% if open_shift %}<script src="{% static 'js/tracker.js' %}"></script>{% endif %}
   {% block scripts %}{% endblock %}
 </body>

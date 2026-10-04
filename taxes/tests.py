@@ -327,3 +327,15 @@ class TrackingTests(BaseCase):
         self.assertNotContains(self.client.get(reverse("collector_home")), "tracker.js")
         self.client.post(reverse("shift_start"))
         self.assertContains(self.client.get(reverse("collector_home")), "tracker.js")
+
+
+class BrandingTests(BaseCase):
+    def test_client_operator_and_prefix_from_settings(self):
+        with self.settings(CLIENT_NAME="Berbera Local Government", OPERATOR_NAME="Example Tech Ltd",
+                           RECEIPT_PREFIX="BRB"):
+            c = self.make()
+            self.assertRegex(c.receipt_number, r"^BRB-\d{4}-\d{8}$")
+            self.client.force_login(self.collector)
+            page = self.client.get(reverse("receipt", args=[c.receipt_number]))
+            self.assertContains(page, "Berbera Local Government")
+            self.assertContains(page, "operated by Example Tech Ltd")

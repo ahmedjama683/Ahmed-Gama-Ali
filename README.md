@@ -2,7 +2,8 @@
 
 An open-source web platform that replaces manual (paper) tax collection for the
 Hargeisa local government in Somaliland. Tax collectors record payments on
-their phones in the field, with GPS. Supervisors follow their collectors'
+their phones in the field, with GPS. It is designed to be run by a service
+company on behalf of a municipality (see [Running it for a client](#running-it-for-a-client-operator-model)). Supervisors follow their collectors'
 performance, Treasury and Audit see the financial numbers, and the Executive
 director sees a live map of where collectors are.
 
@@ -249,7 +250,37 @@ screen" in Chrome so it opens like an app.
 
 ---
 
-## Roadmap ideas
+## Running it for a client (operator model)
+
+The system is designed to be run by a company **on behalf of** a municipality.
+
+**Branding.** Set these in `.env` (the installer asks for them):
+
+| Setting | Example | Shown |
+|---------|---------|-------|
+| `CLIENT_NAME` | Hargeisa Local Government | Receipts, page titles, admin |
+| `OPERATOR_NAME` | *your company* | Footer and receipts: "System operated by …" |
+| `SYSTEM_NAME` | Hargeisa Tax System | Top bar |
+| `RECEIPT_PREFIX` | HGA | Receipt numbers, e.g. `HGA-2026-00000123` |
+| `MAP_CENTER` | 9.5624,44.0770 | Where the tracker map opens |
+
+**One installation per municipality.** To serve another city, install a separate
+copy on its own server (or subdomain, e.g. `berbera.yourcompany.com`) with its own
+`.env` and database. Each client's data stays fully separate.
+
+**Points to agree in the contract with the municipality:**
+* **Data ownership.** All taxpayer and payment data belongs to the municipality. The company processes it only to run the service.
+* **Money flow.** Payments go straight to the municipality's own accounts (its ZAAD/eDahab merchant numbers and bank account), never through the company. The system only records them.
+* **Who has which role.** Executive director, Treasury and Audit accounts are municipal staff. Company staff should only have Admin accounts, for support.
+* **Exit and handover.** If the contract ends, the municipality receives a full database export and the code. The MIT licence already lets them keep using it.
+* **Backups and uptime.** How often backups are taken, where copies are kept, and how quickly problems are fixed.
+* **Location tracking.** Collectors are told in writing that their location is recorded during shifts, and how long it is kept (default 90 days).
+
+**Private repository.** If your company keeps the code private on GitHub, create a
+read-only *fine-grained* access token for this one repository and paste it when the
+installer asks.
+
+
 
 * **Android app** for background location tracking and offline payments (the API is ready).
 * **Collection targets** per collector, with % achieved on the performance page.

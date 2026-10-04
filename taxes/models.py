@@ -273,7 +273,7 @@ class TaxCollection(models.Model):
             with transaction.atomic():
                 super().save(*args, **kwargs)
                 year = timezone.localtime(self.collected_at).year
-                self.receipt_number = f"HGA-{year}-{self.pk:08d}"
+                self.receipt_number = f"{settings.RECEIPT_PREFIX}-{year}-{self.pk:08d}"
                 super().save(update_fields=["receipt_number"])
             return
         super().save(*args, **kwargs)
