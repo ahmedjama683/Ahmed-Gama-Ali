@@ -20,7 +20,8 @@ read -rp "Domain name for the system [tax.pillarsdo.org]: " DOMAIN
 DOMAIN="${DOMAIN:-tax.pillarsdo.org}"
 read -rp "Client government name [Hargeisa Local Government]: " CLIENT_NAME
 CLIENT_NAME="${CLIENT_NAME:-Hargeisa Local Government}"
-read -rp "Operating company name (shown in the footer and on receipts, optional): " OPERATOR_NAME
+read -rp "Operating organization name [Pillar Social Development Organization]: " OPERATOR_NAME
+OPERATOR_NAME="${OPERATOR_NAME:-Pillar Social Development Organization}"
 read -rp "Receipt number prefix [HGA]: " RECEIPT_PREFIX
 RECEIPT_PREFIX="${RECEIPT_PREFIX:-HGA}"
 read -rsp "GitHub access token (only if the repository is private, else press Enter): " GITHUB_TOKEN
@@ -74,7 +75,7 @@ POSTGRES_DB=tax
 POSTGRES_USER=tax
 POSTGRES_PASSWORD=$DB_PASSWORD
 SITE_ADDRESS=$DOMAIN
-SYSTEM_NAME=Tax Collection System
+SYSTEM_NAME=Hargeisa Tax System
 CLIENT_NAME=$CLIENT_NAME
 OPERATOR_NAME=$OPERATOR_NAME
 RECEIPT_PREFIX=$RECEIPT_PREFIX

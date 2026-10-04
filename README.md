@@ -259,7 +259,7 @@ The system is designed to be run by a company **on behalf of** a municipality.
 | Setting | Example | Shown |
 |---------|---------|-------|
 | `CLIENT_NAME` | Hargeisa Local Government | Receipts, page titles, admin |
-| `OPERATOR_NAME` | *your company* | Footer and receipts: "System operated by …" |
+| `OPERATOR_NAME` | Pillar Social Development Organization | Footer and receipts: "System operated by …" |
 | `SYSTEM_NAME` | Hargeisa Tax System | Top bar |
 | `RECEIPT_PREFIX` | HGA | Receipt numbers, e.g. `HGA-2026-00000123` |
 | `MAP_CENTER` | 9.5624,44.0770 | Where the tracker map opens |
