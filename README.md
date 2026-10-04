@@ -2,8 +2,9 @@
 
 An open-source web platform that replaces manual (paper) tax collection for the
 Hargeisa local government in Somaliland. Tax collectors record payments on
-their phones in the field, with GPS. Supervisors, managers and auditors see
-live totals, maps and exports.
+their phones in the field, with GPS. Supervisors follow their collectors'
+performance, Treasury and Audit see the financial numbers, and the Executive
+director sees a live map of where collectors are.
 
 Built only with free, open-source software: **Python / Django**, **PostgreSQL**,
 **Gunicorn**, **Caddy**, **Chart.js** and **Leaflet/OpenStreetMap**.
@@ -46,15 +47,37 @@ For real use, go to level 3.
 
 ### Roles (role-based access)
 
-| Role | Record payments | Sees | Void receipts | Reports & CSV export | Admin site |
-|------|:---:|------|:---:|:---:|:---:|
-| **Tax collector** | ✅ (own department's taxes, own district) | Only their own payments | – | – | – |
-| **Supervisor** | ✅ (can give larger discounts) | Their department | ✅ | ✅ | – |
-| **Revenue manager** | – | Everything | ✅ | ✅ | – |
-| **Auditor** | – | Everything (read-only) | – | ✅ | – |
-| **System administrator** | – | Everything | ✅ | ✅ | ✅ users, tax types, locations |
+| Role | What they see | Pages |
+|------|---------------|-------|
+| **Tax collector** | **Only what they did today**: today's payments, totals and receipts | My day, New payment |
+| **Supervisor** | **Performance of their own collectors** (their department): payments, amounts, discounts, voids, who is on shift. Can void receipts | Collector performance, Collections |
+| **Treasury** | **Financial data and numbers** for the whole city | Financial dashboard, Collections, CSV export |
+| **Auditor** | **Financial data and numbers** (read-only) and the audit log | Financial dashboard, Collections, CSV export |
+| **Executive director** | Everything above **plus the live collector tracker map** | Tracker map, Collector performance, Financial dashboard |
+| **System administrator** | Everything, **including the tracker map**, plus managing users, tax types and locations | All pages + Admin |
 
+**Only the Executive director and Admin can open the tracker map.**
 These rules are enforced on the server for every page and every API call, not just hidden in the menu.
+
+### Collector tracker map (Executive director and Admin only)
+
+* Collectors press **Start shift** on their phone when they begin work. While the shift is open, the phone sends its location **once a minute** (sooner if they move 30 m). **End shift** stops it, so nobody is tracked outside working hours.
+* The map (`/tracker/`) shows each collector's **current position** and **route for the day**, and every payment as a dot. It refreshes every 30 seconds.
+* Status dots: 🟢 on shift and seen in the last 10 minutes, 🟡 on shift but no recent location (app closed or no signal), ⚪ off duty.
+* Click a collector to zoom in on their route with times. Choose an earlier date to replay any past day. Filter by department.
+* Every payment with GPS is also added to the route, even without a shift.
+* On weak networks, points are stored on the phone and sent when the signal returns.
+* **Limitation:** a web page can only share location while it is open on screen. If the collector locks the phone or closes the browser, the dot turns 🟡. Continuous tracking in the background needs an Android app; the API (`/api/tracking/...`) is ready for one.
+* Old location points can be deleted automatically, e.g. after 90 days: `python manage.py purge_location_pings --days 90`. Payments always keep their own GPS.
+* Tell staff in writing that their location is recorded during shifts, and why.
+
+### Collector performance (Supervisors; Executive director and Admin see all departments)
+
+For today, the last 7, 30 or 90 days, for each collector:
+* number of payments and amounts (SLSH and USD), with a ranking chart
+* discounts given (how many, what share, how much) and voided receipts. A high share of either can be an early sign of fraud
+* first and last payment time (today) or active days and payments per day (longer periods)
+* whether they are on shift right now
 
 ### Data recorded for every payment
 
@@ -86,13 +109,14 @@ These rules are enforced on the server for every page and every API call, not ju
 
 | URL | Purpose |
 |-----|---------|
-| `/collector/` | Collector's day: today's totals and recent receipts |
+| `/collector/` | Collector's day: start/end shift, today's totals and receipts |
 | `/collector/new/` | Mobile payment form with automatic GPS and live "to pay" total |
 | `/receipt/<number>/` | Printable receipt (works with small Bluetooth receipt printers) |
 | `/taxpayers/new/` | Register a taxpayer |
 | `/collections/` | Search and filter payments, CSV export |
-| `/dashboard/` | Revenue by day, department, tax type, payment method, district and collector |
-| `/map/` | Map of where payments were collected |
+| `/team/` | Collector performance (supervisors, executive director, admin) |
+| `/tracker/` | Live collector tracker map (executive director, admin) |
+| `/dashboard/` | Financial dashboard: revenue by day, department, tax type, payment method, district, collector (treasury, auditor, executive director, admin) |
 | `/admin/` | Manage users, roles, departments, tax types and locations |
 | `/api/` | REST API for a future Android app or other systems |
 
@@ -104,7 +128,10 @@ GET  /api/me/
 GET  /api/tax-types/   GET /api/villages/
 GET  /api/collections/?since=2026-10-01&status=COMPLETED&search=HGA-2026
 POST /api/collections/       (send your own client_uuid: retries are safe)
-POST /api/collections/<id>/void/   {"reason": "..."}   (supervisor+)
+POST /api/collections/<id>/void/   {"reason": "..."}   (supervisor, executive director, admin)
+GET/POST /api/tracking/shift/      {"action": "start" | "end"}
+POST /api/tracking/ping/           {"latitude": .., "longitude": .., "altitude": .., "accuracy": ..}
+                                   or {"pings": [ ... ]} for points queued offline
 GET/POST /api/taxpayers/
 ```
 Send `Authorization: Token <token>` on every request.
@@ -122,12 +149,21 @@ pip install -r requirements.txt
 python manage.py migrate
 python manage.py seed_demo                      # sample Hargeisa data + demo users
 python manage.py seed_demo --collections 20000  # optional: fake payments to test speed
+python manage.py seed_demo --tracking           # optional: simulate today's collector routes
 python manage.py runserver 0.0.0.0:8080
 ```
 
-Open http://localhost:8080 and log in with one of the demo users
-(`admin`, `manager`, `auditor`, `supervisor`, `collector1`, `collector2`),
-all with password `ChangeMe-2026`.
+Open http://localhost:8080/login/ and log in with one of the demo users.
+All use the password `ChangeMe-2026`:
+
+| Username | Role | Opens on |
+|----------|------|----------|
+| `director` | Executive director | Tracker map |
+| `admin` | System administrator | Tracker map (+ Admin) |
+| `treasury` | Treasury | Financial dashboard |
+| `auditor` | Auditor | Financial dashboard |
+| `supervisor` | Supervisor, Property Tax | Collector performance |
+| `collector1` … `collector4` | Tax collectors | My day |
 
 Run the tests: `python manage.py test`
 
@@ -171,7 +207,9 @@ docker compose exec web python manage.py createsuperuser
 docker compose exec web python manage.py seed_demo --no-users
 
 # 6. Nightly backups
-crontab -e   # add:  0 2 * * * /opt/tax/deploy/backup.sh
+crontab -e   # add:
+#   0 2 * * * /opt/tax/deploy/backup.sh
+#   30 2 * * * cd /opt/tax && docker compose exec -T web python manage.py purge_location_pings --days 90
 ```
 
 Every collector can now open `https://tax.hargeisa.gov.so/collector/` on their
@@ -198,6 +236,8 @@ screen" in Chrome so it opens like an app.
 
 ## Roadmap ideas
 
+* **Android app** for background location tracking and offline payments (the API is ready).
+* **Collection targets** per collector, with % achieved on the performance page.
 * **Offline mode**: an installable app (PWA) that stores payments on the phone when there's no signal and syncs later through the API (the API already deduplicates).
 * **ZAAD / eDahab merchant API integration**: confirm mobile-money payments automatically instead of typing the reference.
 * **SMS receipts** to the payer's phone.
@@ -211,9 +251,10 @@ screen" in Chrome so it opens like an app.
 config/       settings, URLs
 accounts/     users, roles, departments
 locations/    country > region > city > district > village
-taxes/        tax types, taxpayers, collections, audit log, views, API, tests
+taxes/        tax types, taxpayers, collections, shifts and location tracking,
+              audit log, views, API, tests
 templates/    HTML pages
-static/       CSS, Chart.js and Leaflet (served locally, no CDN needed)
+static/       CSS, phone tracking script, Chart.js and Leaflet (served locally)
 deploy/       Caddy (HTTPS) config, backup script
 ```
 

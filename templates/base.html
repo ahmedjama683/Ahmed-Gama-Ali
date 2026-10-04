@@ -15,19 +15,25 @@
     <nav>
       {% if user.can_collect %}<a href="{% url 'collector_home' %}">My day</a>
       <a href="{% url 'collection_create' %}">+ New payment</a>{% endif %}
-      <a href="{% url 'collection_list' %}">Collections</a>
-      {% if user.can_view_reports %}<a href="{% url 'dashboard' %}">Dashboard</a>
-      <a href="{% url 'collection_map' %}">Map</a>{% endif %}
+      {% if user.can_view_tracker %}<a href="{% url 'tracker' %}">Tracker map</a>{% endif %}
+      {% if user.can_view_team %}<a href="{% url 'team' %}">Collector performance</a>{% endif %}
+      {% if user.can_view_financials %}<a href="{% url 'dashboard' %}">Financial dashboard</a>{% endif %}
+      {% if not user.is_collector %}<a href="{% url 'collection_list' %}">Collections</a>{% endif %}
       {% if user.is_staff %}<a href="{% url 'admin:index' %}">Admin</a>{% endif %}
-      <span title="{{ user.get_role_display }}">{{ user.employee_id|default:user.username }}</span>
+      <span title="{{ user.get_role_display }}">{{ user.employee_id|default:user.username }} · {{ user.get_role_display }}</span>
       <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button type="submit">Log out</button></form>
     </nav>
     {% endif %}
   </header>
+  {% if open_shift %}
+  <div id="tracking-indicator" class="tracking warn">● On duty · getting location…</div>
+  <div id="tracking-config" data-url="{% url 'api_tracking_ping' %}" data-csrf="{{ csrf_token }}" hidden></div>
+  {% endif %}
   <main>
     {% for message in messages %}<div class="msg {{ message.tags }}">{{ message }}</div>{% endfor %}
     {% block content %}{% endblock %}
   </main>
+  {% if open_shift %}<script src="{% static 'js/tracker.js' %}"></script>{% endif %}
   {% block scripts %}{% endblock %}
 </body>
 </html>

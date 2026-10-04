@@ -324,3 +324,71 @@ class AuditLog(models.Model):
             details=details,
             ip_address=ip or None,
         )
+
+
+class DutyShift(models.Model):
+    """
+    A collector's working period. Their phone shares its location only while
+    a shift is open, so staff are not tracked outside working hours.
+    """
+
+    collector = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="shifts"
+    )
+    started_at = models.DateTimeField(default=timezone.now)
+    ended_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-started_at"]
+        indexes = [models.Index(fields=["collector", "started_at"])]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["collector"], condition=models.Q(ended_at__isnull=True),
+                name="one_open_shift_per_collector",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.collector} {self.started_at:%Y-%m-%d %H:%M}"
+
+    @classmethod
+    def open_for(cls, user):
+        return cls.objects.filter(collector=user, ended_at__isnull=True).first()
+
+
+class LocationPing(models.Model):
+    """One position report from a collector's phone."""
+
+    class Source(models.TextChoices):
+        SHIFT_START = "SHIFT_START", "Shift started"
+        TRACKING = "TRACKING", "On-duty tracking"
+        PAYMENT = "PAYMENT", "Payment recorded"
+        SHIFT_END = "SHIFT_END", "Shift ended"
+
+    collector = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="location_pings"
+    )
+    shift = models.ForeignKey(
+        DutyShift, on_delete=models.SET_NULL, null=True, blank=True, related_name="pings"
+    )
+    recorded_at = models.DateTimeField(default=timezone.now)
+    latitude = models.DecimalField(
+        max_digits=9, decimal_places=6, validators=[MinValueValidator(-90), MaxValueValidator(90)]
+    )
+    longitude = models.DecimalField(
+        max_digits=9, decimal_places=6,
+        validators=[MinValueValidator(-180), MaxValueValidator(180)],
+    )
+    altitude = models.DecimalField(max_digits=7, decimal_places=1, null=True, blank=True)
+    accuracy = models.DecimalField(max_digits=7, decimal_places=1, null=True, blank=True)
+    source = models.CharField(max_length=12, choices=Source.choices, default=Source.TRACKING)
+
+    class Meta:
+        ordering = ["-recorded_at"]
+        indexes = [
+            models.Index(fields=["collector", "recorded_at"]),
+            models.Index(fields=["recorded_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.collector} {self.recorded_at:%H:%M} {self.latitude},{self.longitude}"

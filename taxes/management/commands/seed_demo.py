@@ -19,7 +19,7 @@ from django.utils import timezone
 
 from accounts.models import Department, User
 from locations.models import City, Country, District, Region, Village
-from taxes.models import PaymentMethod, TaxCollection, TaxType
+from taxes.models import DutyShift, LocationPing, PaymentMethod, TaxCollection, TaxType
 
 DISTRICTS = {
     "26 June": ["Jigjiga Yar", "Masalaha"],
@@ -51,13 +51,16 @@ TAX_TYPES = [
 ]
 
 DEMO_USERS = [
-    # username, first, last, role, employee id, department code
-    ("admin", "System", "Admin", User.Role.ADMIN, "HGA-ADM-001", None),
-    ("manager", "Revenue", "Manager", User.Role.MANAGER, "HGA-MGR-001", None),
-    ("auditor", "Internal", "Auditor", User.Role.AUDITOR, "HGA-AUD-001", None),
-    ("supervisor", "Property", "Supervisor", User.Role.SUPERVISOR, "HGA-SUP-001", "PROP"),
-    ("collector1", "Amina", "Collector", User.Role.COLLECTOR, "HGA-TC-0001", "PROP"),
-    ("collector2", "Abdi", "Collector", User.Role.COLLECTOR, "HGA-TC-0002", "MKT"),
+    # username, first, last, role, employee id, department code, district
+    ("admin", "System", "Admin", User.Role.ADMIN, "HGA-ADM-001", None, None),
+    ("director", "Executive", "Director", User.Role.EXECUTIVE, "HGA-EXE-001", None, None),
+    ("treasury", "Treasury", "Officer", User.Role.TREASURY, "HGA-TRS-001", None, None),
+    ("auditor", "Internal", "Auditor", User.Role.AUDITOR, "HGA-AUD-001", None, None),
+    ("supervisor", "Property", "Supervisor", User.Role.SUPERVISOR, "HGA-SUP-001", "PROP", None),
+    ("collector1", "Amina", "Warsame", User.Role.COLLECTOR, "HGA-TC-0001", "PROP", "26 June"),
+    ("collector2", "Abdi", "Farah", User.Role.COLLECTOR, "HGA-TC-0002", "MKT", "Ahmed Dhagah"),
+    ("collector3", "Hodan", "Jama", User.Role.COLLECTOR, "HGA-TC-0003", "PROP", "Ga'an Libah"),
+    ("collector4", "Yusuf", "Ali", User.Role.COLLECTOR, "HGA-TC-0004", "PROP", "Mohamed Mooge"),
 ]
 DEMO_PASSWORD = "ChangeMe-2026"
 
@@ -71,6 +74,8 @@ class Command(BaseCommand):
         parser.add_argument("--collections", type=int, default=0,
                             help="Number of random test payments to create.")
         parser.add_argument("--no-users", action="store_true", help="Skip demo users.")
+        parser.add_argument("--tracking", action="store_true",
+                            help="Simulate today's shifts and walking routes for the tracker map.")
 
     @transaction.atomic
     def handle(self, *args, **opts):
@@ -97,10 +102,11 @@ class Command(BaseCommand):
             f"{TaxType.objects.count()} tax types"))
 
         if not opts["no_users"]:
-            for username, first, last, role, emp_id, dept in DEMO_USERS:
+            for username, first, last, role, emp_id, dept, district in DEMO_USERS:
                 user, created = User.objects.get_or_create(username=username, defaults=dict(
                     first_name=first, last_name=last, role=role, employee_id=emp_id,
                     department=depts.get(dept),
+                    assigned_district=District.objects.filter(city=city, name=district).first(),
                     is_staff=role == User.Role.ADMIN, is_superuser=role == User.Role.ADMIN))
                 if created:
                     user.set_password(DEMO_PASSWORD)
@@ -112,6 +118,8 @@ class Command(BaseCommand):
         n = opts["collections"]
         if n:
             self._random_collections(n, villages)
+        if opts["tracking"]:
+            self._simulate_tracking(villages)
 
     def _random_collections(self, n, villages):
         collectors = list(User.objects.filter(role__in=[User.Role.COLLECTOR, User.Role.SUPERVISOR]))
@@ -157,3 +165,48 @@ class Command(BaseCommand):
                 batch = []
         TaxCollection.objects.bulk_create(batch)
         self.stdout.write(self.style.SUCCESS(f"Created {n} random test payments."))
+
+    def _simulate_tracking(self, villages):
+        """Open shifts from 08:00 for most collectors, with a walking route and payments."""
+        now = timezone.localtime()
+        start = now.replace(hour=8, minute=0, second=0, microsecond=0)
+        if now <= start:
+            start = now - timedelta(hours=3)
+        lat0, lon0, alt0 = HARGEISA
+        collectors = list(User.objects.filter(role=User.Role.COLLECTOR).order_by("username"))
+        q = Decimal("0.000001")
+        for idx, collector in enumerate(collectors):
+            DutyShift.objects.filter(collector=collector, ended_at__isnull=True).update(ended_at=now)
+            shift = DutyShift.objects.create(collector=collector, started_at=start)
+            # The last collector has closed the app an hour ago, to show a "stale" status.
+            stop = now - timedelta(hours=1) if idx == len(collectors) - 1 else now
+            lat = lat0 + random.uniform(-0.02, 0.02)
+            lon = lon0 + random.uniform(-0.025, 0.025)
+            heading_lat, heading_lon = random.uniform(-1, 1), random.uniform(-1, 1)
+            t, pings = start, []
+            tax_types = list(TaxType.objects.filter(department_id=collector.department_id)) \
+                or list(TaxType.objects.all())
+            while t <= stop:
+                if random.random() < 0.15:  # change street now and then
+                    heading_lat, heading_lon = random.uniform(-1, 1), random.uniform(-1, 1)
+                lat += heading_lat * 0.00025
+                lon += heading_lon * 0.00025
+                pings.append(LocationPing(
+                    collector=collector, shift=shift, recorded_at=t,
+                    latitude=Decimal(lat).quantize(q), longitude=Decimal(lon).quantize(q),
+                    altitude=Decimal(alt0 + random.uniform(-20, 20)).quantize(Decimal("0.1")),
+                    accuracy=Decimal(random.uniform(4, 20)).quantize(Decimal("0.1"))))
+                if random.random() < 0.12:
+                    t_type = random.choice(tax_types)
+                    c = TaxCollection(
+                        collector=collector, tax_type=t_type, department_id=t_type.department_id,
+                        payer_name=f"Payer {random.randint(100, 999)}", currency=t_type.currency,
+                        tax_amount=t_type.default_amount, payment_method=PaymentMethod.ZAAD,
+                        transaction_reference=f"ZD{random.randint(10**6, 10**7)}",
+                        collected_at=t, village=random.choice(villages),
+                        latitude=Decimal(lat).quantize(q), longitude=Decimal(lon).quantize(q))
+                    c.save()
+                t += timedelta(minutes=2)
+            LocationPing.objects.bulk_create(pings)
+        self.stdout.write(self.style.SUCCESS(
+            f"Simulated today's routes for {len(collectors)} collectors."))

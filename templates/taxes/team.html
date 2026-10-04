@@ -1,0 +1,87 @@
+{% extends "base.html" %}{% load humanize static %}
+{% block title %}Collector performance{% endblock %}
+{% block content %}
+<h1>Collector performance · {{ period_label }}</h1>
+
+<form method="get" class="toolbar">
+  <div class="field"><label for="period">Period</label>
+    <select class="input" id="period" name="period" onchange="this.form.submit()">
+      {% for key, label in periods.items %}<option value="{{ key }}" {% if key == period %}selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select></div>
+  {% if departments %}
+  <div class="field"><label for="department">Department</label>
+    <select class="input" id="department" name="department" onchange="this.form.submit()">
+      <option value="">All departments</option>
+      {% for d in departments %}<option value="{{ d.pk }}" {% if d.pk|stringformat:"s" == department %}selected{% endif %}>{{ d.name }}</option>{% endfor %}
+    </select></div>
+  {% elif user.department %}
+  <p class="muted">Team: {{ user.department.name }}</p>
+  {% endif %}
+</form>
+
+<div class="grid">
+  <div class="card stat"><div class="label">Collectors on shift now</div><div class="value">{{ totals.on_shift }} / {{ rows|length }}</div></div>
+  <div class="card stat"><div class="label">Payments</div><div class="value">{{ totals.payments|intcomma }}</div></div>
+  <div class="card stat"><div class="label">Collected (SLSH)</div><div class="value">{{ totals.slsh|floatformat:0|intcomma }}</div></div>
+  <div class="card stat"><div class="label">Collected (USD)</div><div class="value">{{ totals.usd|floatformat:0|intcomma }}</div></div>
+  <div class="card stat"><div class="label">Voided receipts</div><div class="value">{{ totals.voided }}</div></div>
+</div>
+
+{% if rows %}
+<div class="card"><h2>Collected per collector (SLSH)</h2>
+  <div style="height: {{ chart_height }}px"><canvas id="team-chart"></canvas></div>
+</div>
+{% endif %}
+
+<div class="card table-wrap">
+<table>
+  <thead><tr>
+    <th>#</th><th>Collector</th><th>Status</th><th class="num">Payments</th>
+    <th class="num">SLSH</th><th class="num">USD</th>
+    <th class="num" title="Payments with a discount">Discounts</th><th class="num">Discount given</th>
+    <th class="num">Voided</th>
+    {% if period == "today" %}<th>First</th><th>Last</th>{% else %}<th class="num">Active days</th><th class="num">Payments / day</th>{% endif %}
+  </tr></thead>
+  <tbody>
+  {% for r in rows %}
+  <tr>
+    <td>{{ forloop.counter }}</td>
+    <td><strong>{{ r.user.employee_id|default:r.user.username }}</strong> {{ r.user.get_full_name }}<br>
+      <span class="muted">{{ r.user.department.name|default:"" }}{% if r.user.assigned_district %} · {{ r.user.assigned_district.name }}{% endif %}</span></td>
+    <td>{% if r.on_shift %}<span class="dot online"></span>On shift{% else %}<span class="dot off"></span>Off{% endif %}</td>
+    <td class="num">{{ r.payments }}</td>
+    <td class="num">{{ r.slsh|floatformat:0|intcomma }}</td>
+    <td class="num">{{ r.usd|floatformat:2|intcomma }}</td>
+    <td class="num">{{ r.discounted }} <span class="muted">({{ r.discount_rate }}%)</span></td>
+    <td class="num">{{ r.discount_slsh|floatformat:0|intcomma }} SLSH{% if r.discount_usd %}<br>{{ r.discount_usd|floatformat:2 }} USD{% endif %}</td>
+    <td class="num">{% if r.voided %}<strong style="color: var(--danger)">{{ r.voided }}</strong>{% else %}0{% endif %}</td>
+    {% if period == "today" %}
+      <td>{{ r.first|time:"H:i"|default:"–" }}</td><td>{{ r.last|time:"H:i"|default:"–" }}</td>
+    {% else %}
+      <td class="num">{{ r.active_days }}</td><td class="num">{{ r.per_day }}</td>
+    {% endif %}
+  </tr>
+  {% empty %}<tr><td colspan="11" class="muted">No collectors in this team yet. An administrator assigns collectors to departments.</td></tr>{% endfor %}
+  </tbody>
+</table>
+</div>
+<p class="muted">A high share of discounted payments or many voided receipts may need a closer look.</p>
+{{ chart|json_script:"team-data" }}
+{% endblock %}
+{% block scripts %}
+<script src="{% static 'vendor/chart.umd.js' %}"></script>
+<script>
+(function () {
+  var el = document.getElementById("team-chart");
+  if (!el || !window.Chart) return;
+  var rows = JSON.parse(document.getElementById("team-data").textContent);
+  new Chart(el, {
+    type: "bar",
+    data: {labels: rows.map(function (r) { return r.label; }),
+           datasets: [{label: "SLSH", data: rows.map(function (r) { return r.slsh; }), backgroundColor: "#006d3b"}]},
+    options: {indexAxis: "y", maintainAspectRatio: false, plugins: {legend: {display: false}},
+              scales: {x: {beginAtZero: true}}}
+  });
+})();
+</script>
+{% endblock %}

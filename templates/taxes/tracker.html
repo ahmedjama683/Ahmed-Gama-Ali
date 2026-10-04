@@ -1,0 +1,175 @@
+{% extends "base.html" %}{% load static %}
+{% block title %}Collector tracker{% endblock %}
+{% block head %}<link rel="stylesheet" href="{% static 'vendor/leaflet/leaflet.css' %}">
+<style>main { max-width: 1400px; }</style>{% endblock %}
+{% block content %}
+<h1>Collector tracker</h1>
+<div class="toolbar">
+  <div class="field"><label for="day">Date</label>
+    <input class="input" type="date" id="day" value="{{ today }}" max="{{ today }}"></div>
+  <div class="field"><label for="department">Department</label>
+    <select class="input" id="department"><option value="">All departments</option>
+      {% for d in departments %}<option value="{{ d.pk }}">{{ d.name }}</option>{% endfor %}
+    </select></div>
+  <label><input type="checkbox" id="show-payments" checked> Show payments</label>
+  <label><input type="checkbox" id="show-trails" checked> Show routes</label>
+  <span class="muted" id="updated"></span>
+</div>
+<p class="muted">
+  <span class="dot online"></span>On shift, location received in the last 10 min ·
+  <span class="dot stale"></span>On shift, no recent location (app closed or no signal) ·
+  <span class="dot off"></span>Off duty
+</p>
+<div class="tracker">
+  <div class="card list" id="list"><p class="muted" style="padding: 14px">Loading…</p></div>
+  <div id="map"></div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="{% static 'vendor/leaflet/leaflet.js' %}"></script>
+<script>
+(function () {
+  var DATA_URL = "{% url 'tracker_data' %}";
+  var COLORS = ["#006d3b", "#1f6feb", "#c8102e", "#8250df", "#d4a72c", "#0a8a8a", "#bf3989", "#6e7781"];
+  var STATE = {online: "#1f9d55", stale: "#e0a100", off: "#9aa5a0"};
+
+  var map = L.map("map").setView([9.5624, 44.0770], 13);  // Hargeisa
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19, attribution: "&copy; OpenStreetMap contributors"
+  }).addTo(map);
+  var trailLayer = L.layerGroup().addTo(map);
+  var paymentLayer = L.layerGroup().addTo(map);
+  var markerLayer = L.layerGroup().addTo(map);
+
+  var selected = null, firstFit = true, timer = null, lastData = null;
+  var $ = function (id) { return document.getElementById(id); };
+
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+  function money(c) {
+    var parts = [];
+    if (c.slsh) parts.push(c.slsh.toLocaleString() + " SLSH");
+    if (c.usd) parts.push(c.usd.toLocaleString() + " USD");
+    return parts.join(" + ") || "0";
+  }
+  function lastSeen(c) {
+    if (!c.last) return "No location " + (lastData && lastData.is_today ? "today" : "this day");
+    if (lastData.is_today) {
+      var m = c.last.minutes_ago;
+      return "Seen " + (m < 1 ? "just now" : m < 60 ? m + " min ago" : Math.floor(m / 60) + " h " + (m % 60) + " min ago");
+    }
+    return "Last seen " + c.last.time;
+  }
+
+  function render(data) {
+    lastData = data;
+    var colorOf = {};
+    data.collectors.forEach(function (c, i) { colorOf[c.id] = COLORS[i % COLORS.length]; });
+    trailLayer.clearLayers(); paymentLayer.clearLayers(); markerLayer.clearLayers();
+    var bounds = [];
+
+    // Sidebar list, people on shift first.
+    var order = {online: 0, stale: 1, off: 2};
+    var people = data.collectors.slice().sort(function (a, b) {
+      return order[a.state] - order[b.state] || b.payments - a.payments;
+    });
+    var list = $("list");
+    list.textContent = "";
+    if (!people.length) list.appendChild(el("p", "muted", "No collectors."));
+    people.forEach(function (c) {
+      var b = el("button", selected === c.id ? "active" : "");
+      var title = el("div");
+      title.appendChild(el("span", "dot " + c.state));
+      title.appendChild(el("strong", null, c.employee_id + " "));
+      title.appendChild(document.createTextNode(c.name));
+      b.appendChild(title);
+      b.appendChild(el("div", "sub", (c.department || "") + (c.district ? " · " + c.district : "")));
+      b.appendChild(el("div", "sub", lastSeen(c) + (c.shift_started ? " · shift from " + c.shift_started : "")));
+      b.appendChild(el("div", "sub", c.payments + " payments · " + money(c)));
+      b.addEventListener("click", function () {
+        selected = selected === c.id ? null : c.id;
+        render(lastData);
+        if (selected && c.last) map.setView([c.last.lat, c.last.lon], 16);
+      });
+      list.appendChild(b);
+    });
+
+    data.collectors.forEach(function (c) {
+      var dim = selected && selected !== c.id;
+      if ($("show-trails").checked && c.trail.length > 1 && !dim) {
+        L.polyline(c.trail.map(function (p) { return [p[0], p[1]]; }),
+          {color: colorOf[c.id], weight: selected ? 4 : 3, opacity: 0.75}).addTo(trailLayer);
+        if (selected === c.id) {
+          c.trail.forEach(function (p) {
+            L.circleMarker([p[0], p[1]], {radius: 3, color: colorOf[c.id], fillOpacity: 1})
+              .bindTooltip(p[2] + (p[3] ? " · ±" + Math.round(p[3]) + " m" : ""))
+              .addTo(trailLayer);
+          });
+        }
+      }
+      if (c.last) {
+        var marker = L.circleMarker([c.last.lat, c.last.lon], {
+          radius: dim ? 6 : 10, color: "#fff", weight: 2, fillColor: STATE[c.state],
+          fillOpacity: dim ? 0.4 : 1
+        }).addTo(markerLayer);
+        var pop = el("div");
+        pop.appendChild(el("strong", null, c.employee_id + " " + c.name));
+        pop.appendChild(el("div", null, lastSeen(c) + (c.last.accuracy ? " (±" + Math.round(c.last.accuracy) + " m)" : "")));
+        pop.appendChild(el("div", null, c.payments + " payments · " + money(c)));
+        marker.bindPopup(pop);
+        marker.bindTooltip(c.employee_id, {permanent: !dim, direction: "top", offset: [0, -8]});
+        bounds.push([c.last.lat, c.last.lon]);
+      }
+    });
+
+    if ($("show-payments").checked) {
+      data.payments.forEach(function (p) {
+        if (selected && selected !== p.collector_id) return;
+        var m = L.circleMarker([p.latitude, p.longitude], {
+          radius: 4, color: p.status === "VOIDED" ? "#c8102e" : colorOf[p.collector_id] || "#006d3b",
+          weight: 1, fillOpacity: 0.5
+        }).addTo(paymentLayer);
+        var pop = el("div");
+        pop.appendChild(el("strong", null, p.receipt_number + (p.status === "VOIDED" ? " (voided)" : "")));
+        pop.appendChild(el("div", null, p.collected_at + " · " + p.payer_name));
+        pop.appendChild(el("div", null, p.amount_paid.toLocaleString() + " " + p.currency));
+        m.bindPopup(pop);
+        if (!bounds.length) bounds.push([p.latitude, p.longitude]);
+      });
+    }
+
+    if (firstFit && bounds.length) {
+      map.fitBounds(bounds, {maxZoom: 15, padding: [30, 30]});
+      firstFit = false;
+    }
+    $("updated").textContent = data.is_today
+      ? "Live · updated " + new Date().toTimeString().slice(0, 5)
+      : "History for " + data.date;
+  }
+
+  function load() {
+    var q = "?date=" + encodeURIComponent($("day").value) +
+            "&department=" + encodeURIComponent($("department").value);
+    fetch(DATA_URL + q, {credentials: "same-origin"})
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        render(data);
+        clearTimeout(timer);
+        if (data.is_today) timer = setTimeout(load, 30000);  // live refresh
+      })
+      .catch(function () { $("updated").textContent = "Could not load, retrying…"; timer = setTimeout(load, 30000); });
+  }
+  ["day", "department"].forEach(function (id) {
+    $(id).addEventListener("change", function () { firstFit = true; selected = null; load(); });
+  });
+  ["show-payments", "show-trails"].forEach(function (id) {
+    $(id).addEventListener("change", function () { if (lastData) render(lastData); });
+  });
+  load();
+})();
+</script>
+{% endblock %}

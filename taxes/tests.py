@@ -1,17 +1,19 @@
 import uuid
+from datetime import timedelta
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 from rest_framework.authtoken.models import Token
 from rest_framework.test import APIClient
 
 from accounts.models import User
 from locations.models import Village
 
-from .models import AuditLog, TaxCollection, TaxType
+from .models import AuditLog, DutyShift, LocationPing, TaxCollection, TaxType
 
 
 class BaseCase(TestCase):
@@ -21,9 +23,11 @@ class BaseCase(TestCase):
         cls.collector = User.objects.get(username="collector1")  # PROP department
         cls.collector2 = User.objects.get(username="collector2")  # MKT department
         cls.supervisor = User.objects.get(username="supervisor")  # PROP department
-        cls.manager = User.objects.get(username="manager")
+        cls.director = User.objects.get(username="director")
+        cls.treasury = User.objects.get(username="treasury")
+        cls.admin = User.objects.get(username="admin")
         cls.auditor = User.objects.get(username="auditor")
-        cls.village = Village.objects.first()
+        cls.village = Village.objects.filter(district=cls.collector.assigned_district).first()
         cls.prop = TaxType.objects.get(code="PROP-RES")  # 10% collector limit
         cls.stall = TaxType.objects.get(code="MKT-STALL")
 
@@ -125,7 +129,7 @@ class WebTests(BaseCase):
         self.assertEqual(self.client.get(reverse("receipt", args=[mine.receipt_number])).status_code, 200)
         self.assertEqual(self.client.get(reverse("receipt", args=[other.receipt_number])).status_code, 404)
         # Manager sees everything.
-        self.client.force_login(self.manager)
+        self.client.force_login(self.director)
         self.assertEqual(self.client.get(reverse("receipt", args=[other.receipt_number])).status_code, 200)
 
     def test_role_restricted_pages(self):
@@ -149,8 +153,8 @@ class WebTests(BaseCase):
 
     def test_reports_render(self):
         self.make()
-        self.client.force_login(self.manager)
-        for name in ["dashboard", "collection_list", "collection_map", "collection_map_data"]:
+        self.client.force_login(self.director)
+        for name in ["dashboard", "collection_list", "tracker", "tracker_data", "team"]:
             self.assertEqual(self.client.get(reverse(name)).status_code, 200, name)
         r = self.client.get(reverse("collection_export"))
         body = b"".join(r.streaming_content).decode()
@@ -197,3 +201,129 @@ class ApiTests(BaseCase):
         me = self.api.get("/api/me/")
         self.assertEqual(me.data["employee_id"], "HGA-TC-0001")
         self.assertEqual(self.api.get("/api/villages/").status_code, 200)
+
+
+class RoleMatrixTests(BaseCase):
+    """Who may open which page. 200 = allowed, 403 = forbidden."""
+
+    PAGES = ["tracker", "tracker_data", "dashboard", "collection_export", "team",
+             "collection_create"]
+    EXPECTED = {
+        #             tracker data  finance export team  collect
+        "admin":      [200, 200,   200,    200,   200,  403],
+        "director":   [200, 200,   200,    200,   200,  403],
+        "treasury":   [403, 403,   200,    200,   403,  403],
+        "auditor":    [403, 403,   200,    200,   403,  403],
+        "supervisor": [403, 403,   403,    403,   200,  200],
+        "collector1": [403, 403,   403,    403,   403,  200],
+    }
+
+    def test_matrix(self):
+        for username, codes in self.EXPECTED.items():
+            self.client.force_login(User.objects.get(username=username))
+            for page, code in zip(self.PAGES, codes):
+                r = self.client.get(reverse(page))
+                self.assertEqual(r.status_code, code, f"{username} -> {page}")
+
+    def test_home_redirects_by_role(self):
+        for username, target in [("director", "tracker"), ("treasury", "dashboard"),
+                                 ("supervisor", "team"), ("collector1", "collector_home")]:
+            self.client.force_login(User.objects.get(username=username))
+            self.assertRedirects(self.client.get("/"), reverse(target),
+                                 fetch_redirect_response=False)
+
+
+class CollectorTodayOnlyTests(BaseCase):
+    def test_collector_sees_only_today(self):
+        today = self.make(payer_name="Today payer")
+        old = self.make(payer_name="Yesterday payer",
+                        collected_at=timezone.now() - timedelta(days=1, hours=1))
+        self.client.force_login(self.collector)
+        home = self.client.get(reverse("collector_home")).content.decode()
+        self.assertIn("Today payer", home)
+        self.assertNotIn("Yesterday payer", home)
+        self.assertEqual(self.client.get(reverse("receipt", args=[old.receipt_number])).status_code, 404)
+        self.assertEqual(self.client.get(reverse("receipt", args=[today.receipt_number])).status_code, 200)
+        listing = self.client.get(reverse("collection_list")).content.decode()
+        self.assertNotIn("Yesterday payer", listing)
+        # The supervisor still sees the older payment.
+        self.client.force_login(self.supervisor)
+        self.assertEqual(self.client.get(reverse("receipt", args=[old.receipt_number])).status_code, 200)
+
+
+class TeamPerformanceTests(BaseCase):
+    def test_supervisor_sees_only_own_department_collectors(self):
+        self.make(collector=self.collector)
+        self.client.force_login(self.supervisor)
+        r = self.client.get(reverse("team"))
+        names = [row["user"].username for row in r.context["rows"]]
+        self.assertIn("collector1", names)
+        self.assertNotIn("collector2", names)  # Markets department
+        row = next(x for x in r.context["rows"] if x["user"].username == "collector1")
+        self.assertEqual(row["payments"], 1)
+        self.assertEqual(row["slsh"], Decimal("300000"))
+
+    def test_director_sees_all_departments(self):
+        self.client.force_login(self.director)
+        names = [row["user"].username for row in self.client.get(reverse("team")).context["rows"]]
+        self.assertIn("collector1", names)
+        self.assertIn("collector2", names)
+
+
+class TrackingTests(BaseCase):
+    def setUp(self):
+        self.api = APIClient()
+        self.api.force_authenticate(self.collector)
+
+    def test_ping_requires_open_shift(self):
+        r = self.api.post("/api/tracking/ping/", {"latitude": "9.56", "longitude": "44.07"},
+                          format="json")
+        self.assertEqual(r.status_code, 409)
+
+    def test_shift_and_pings(self):
+        self.client.force_login(self.collector)
+        self.client.post(reverse("shift_start"))
+        self.client.post(reverse("shift_start"))  # double tap: still one open shift
+        self.assertEqual(DutyShift.objects.filter(collector=self.collector,
+                                                  ended_at__isnull=True).count(), 1)
+        r = self.api.post("/api/tracking/ping/", {"pings": [
+            {"latitude": "9.561234", "longitude": "44.071234", "altitude": "1330", "accuracy": "8"},
+            {"latitude": "9.562", "longitude": "44.072",
+             "recorded_at": (timezone.now() - timedelta(minutes=3)).isoformat()},
+        ]}, format="json")
+        self.assertEqual(r.status_code, 201, r.data)
+        self.assertEqual(LocationPing.objects.filter(collector=self.collector).count(), 2)
+        bad = self.api.post("/api/tracking/ping/", {"latitude": "95", "longitude": "44"},
+                            format="json")
+        self.assertEqual(bad.status_code, 400)
+        # The director sees the collector online on the tracker.
+        self.client.force_login(self.director)
+        data = self.client.get(reverse("tracker_data")).json()
+        me = next(c for c in data["collectors"] if c["employee_id"] == "HGA-TC-0001")
+        self.assertEqual(me["state"], "online")
+        self.assertEqual(len(me["trail"]), 2)
+        # Ending the shift stops tracking.
+        self.client.force_login(self.collector)
+        self.client.post(reverse("shift_end"))
+        r = self.api.post("/api/tracking/ping/", {"latitude": "9.56", "longitude": "44.07"},
+                          format="json")
+        self.assertEqual(r.status_code, 409)
+
+    def test_payment_adds_track_point(self):
+        self.client.force_login(self.collector)
+        self.client.post(reverse("collection_create"), self.form_data())
+        ping = LocationPing.objects.get(collector=self.collector)
+        self.assertEqual(ping.source, LocationPing.Source.PAYMENT)
+
+    def test_non_collectors_cannot_ping(self):
+        api = APIClient()
+        api.force_authenticate(self.director)
+        r = api.post("/api/tracking/ping/", {"latitude": "9.56", "longitude": "44.07"},
+                     format="json")
+        self.assertEqual(r.status_code, 403)
+
+    def test_tracking_script_only_on_shift(self):
+        self.client.force_login(self.collector)
+        self.assertNotContains(self.client.get(reverse("collector_home")), "tracker.js")
+        self.client.post(reverse("shift_start"))
+        self.assertContains(self.client.get(reverse("collector_home")), "tracker.js")

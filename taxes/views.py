@@ -1,27 +1,26 @@
 import csv
 import uuid
-from datetime import timedelta
+from datetime import date, datetime, time, timedelta
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import Paginator
-from django.db.models import Count, Q, Sum
+from django.db import IntegrityError
+from django.db.models import Count, Max, Min, Q, Sum
 from django.db.models.functions import TruncDate
 from django.http import JsonResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 
-from .access import role_required, scoped_collections
+from accounts.models import Department
+
+from .access import role_required, scoped_collections, scoped_team, today_range
 from .forms import CollectionFilterForm, CollectionForm, TaxpayerForm, VoidForm
-from .models import AuditLog, TaxCollection
+from .models import AuditLog, DutyShift, LocationPing, TaxCollection
 
 COMPLETED = TaxCollection.Status.COMPLETED
-
-
-def _today_range():
-    start = timezone.localtime().replace(hour=0, minute=0, second=0, microsecond=0)
-    return start, start + timedelta(days=1)
+VOIDED = TaxCollection.Status.VOIDED
 
 
 def _totals_by_currency(qs):
@@ -35,10 +34,13 @@ def _totals_by_currency(qs):
 
 @login_required
 def home(request):
-    if request.user.can_collect and not request.user.can_view_reports:
-        return redirect("collector_home")
-    if request.user.can_view_reports:
+    user = request.user
+    if user.can_view_tracker:
+        return redirect("tracker")
+    if user.can_view_financials:
         return redirect("dashboard")
+    if user.can_view_team:
+        return redirect("team")
     return redirect("collector_home")
 
 
@@ -47,13 +49,15 @@ def home(request):
 @login_required
 def collector_home(request):
     user = request.user
-    start, end = _today_range()
-    mine = TaxCollection.objects.filter(collector=user)
-    today = mine.filter(collected_at__gte=start, collected_at__lt=end)
+    start, end = today_range()
+    today = TaxCollection.objects.filter(
+        collector=user, collected_at__gte=start, collected_at__lt=end
+    )
     return render(request, "taxes/collector_home.html", {
         "today_totals": _totals_by_currency(today),
         "today_count": today.filter(status=COMPLETED).count(),
-        "recent": mine.select_related("tax_type", "village")[:15],
+        "today_list": today.select_related("tax_type", "village"),
+        "shift": DutyShift.open_for(user),
     })
 
 
@@ -75,6 +79,14 @@ def collection_create(request):
             collection = form.save(commit=False)
             collection.collector = user
             collection.save()
+            if collection.latitude is not None:
+                # Every payment with GPS is also a point on the collector's track.
+                LocationPing.objects.create(
+                    collector=user, shift=DutyShift.open_for(user),
+                    recorded_at=collection.collected_at, latitude=collection.latitude,
+                    longitude=collection.longitude, altitude=collection.altitude,
+                    accuracy=collection.gps_accuracy, source=LocationPing.Source.PAYMENT,
+                )
             AuditLog.record(request, "collection.create", collection,
                             receipt=collection.receipt_number,
                             amount=str(collection.amount_paid), currency=collection.currency)
@@ -162,7 +174,7 @@ class _Echo:
 
 
 @login_required
-@role_required("can_view_reports")
+@role_required("can_view_financials")
 def collection_export(request):
     """Stream a CSV so very large exports do not exhaust server memory."""
     qs, _ = _filtered(request)
@@ -200,7 +212,7 @@ def collection_export(request):
 
 
 @login_required
-@role_required("can_view_reports")
+@role_required("can_view_financials")
 def dashboard(request):
     try:
         days = max(1, min(int(request.GET.get("days", 30)), 366))
@@ -240,28 +252,6 @@ def dashboard(request):
 
 
 @login_required
-@role_required("can_view_reports")
-def collection_map(request):
-    return render(request, "taxes/map.html")
-
-
-@login_required
-@role_required("can_view_reports")
-def collection_map_data(request):
-    qs, _ = _filtered(request)
-    qs = qs.exclude(latitude__isnull=True).values(
-        "receipt_number", "latitude", "longitude", "amount_paid", "currency",
-        "payer_name", "status", "collected_at", "collector__employee_id",
-    )[:5000]
-    return JsonResponse({"points": [
-        {**p, "latitude": float(p["latitude"]), "longitude": float(p["longitude"]),
-         "amount_paid": float(p["amount_paid"]),
-         "collected_at": timezone.localtime(p["collected_at"]).strftime("%Y-%m-%d %H:%M")}
-        for p in qs
-    ]})
-
-
-@login_required
 @role_required("can_void")
 def collection_void(request, pk):
     collection = get_object_or_404(scoped_collections(request.user), pk=pk)
@@ -277,3 +267,208 @@ def collection_void(request, pk):
             messages.success(request, f"Receipt {collection.receipt_number} voided.")
         return redirect("receipt", receipt_number=collection.receipt_number)
     return render(request, "taxes/void_form.html", {"form": form, "c": collection})
+
+
+# --- Duty shifts (collector) -----------------------------------------------
+
+@login_required
+@role_required("can_collect")
+def shift_start(request):
+    if request.method == "POST" and not DutyShift.open_for(request.user):
+        try:
+            shift = DutyShift.objects.create(collector=request.user)
+        except IntegrityError:  # double tap: a shift was opened a moment ago
+            pass
+        else:
+            AuditLog.record(request, "shift.start", shift)
+            messages.success(request, "Shift started. Keep this app open while you work "
+                                      "so your location is shared.")
+    return redirect("collector_home")
+
+
+@login_required
+@role_required("can_collect")
+def shift_end(request):
+    shift = DutyShift.open_for(request.user)
+    if request.method == "POST" and shift:
+        shift.ended_at = timezone.now()
+        shift.save(update_fields=["ended_at"])
+        AuditLog.record(request, "shift.end", shift)
+        messages.success(request, "Shift ended. Location sharing has stopped.")
+    return redirect("collector_home")
+
+
+# --- Supervisor: collector performance -------------------------------------
+
+PERIODS = {"today": "Today", "7": "Last 7 days", "30": "Last 30 days", "90": "Last 90 days"}
+
+
+@login_required
+@role_required("can_view_team")
+def team(request):
+    period = request.GET.get("period", "today")
+    if period not in PERIODS:
+        period = "today"
+    start, end = today_range()
+    if period != "today":
+        start = end - timedelta(days=int(period))
+    collectors = list(scoped_team(request.user))
+    department = request.GET.get("department")
+    if department and request.user.can_view_tracker:
+        collectors = [c for c in collectors if str(c.department_id) == department]
+
+    base = TaxCollection.objects.filter(
+        collector__in=collectors, collected_at__gte=start, collected_at__lt=end
+    )
+    done = Q(status=COMPLETED)
+    stats = {
+        row["collector"]: row
+        for row in base.values("collector").annotate(
+            payments=Count("id", filter=done),
+            slsh=Sum("amount_paid", filter=done & Q(currency="SLSH")),
+            usd=Sum("amount_paid", filter=done & Q(currency="USD")),
+            discount_slsh=Sum("discount_amount", filter=done & Q(currency="SLSH")),
+            discount_usd=Sum("discount_amount", filter=done & Q(currency="USD")),
+            discounted=Count("id", filter=done & Q(discount_amount__gt=0)),
+            voided=Count("id", filter=Q(status=VOIDED)),
+            first=Min("collected_at", filter=done),
+            last=Max("collected_at", filter=done),
+            active_days=Count(TruncDate("collected_at"), filter=done, distinct=True),
+        )
+    }
+    on_shift = set(
+        DutyShift.objects.filter(collector__in=collectors, ended_at__isnull=True)
+        .values_list("collector_id", flat=True)
+    )
+    rows = []
+    for c in collectors:
+        s = stats.get(c.pk, {})
+        payments = s.get("payments") or 0
+        days = s.get("active_days") or 0
+        rows.append({
+            "user": c,
+            "payments": payments,
+            "slsh": s.get("slsh") or 0,
+            "usd": s.get("usd") or 0,
+            "discount_slsh": s.get("discount_slsh") or 0,
+            "discount_usd": s.get("discount_usd") or 0,
+            "discounted": s.get("discounted") or 0,
+            "discount_rate": round(100 * (s.get("discounted") or 0) / payments) if payments else 0,
+            "voided": s.get("voided") or 0,
+            "first": s.get("first"),
+            "last": s.get("last"),
+            "active_days": days,
+            "per_day": round(payments / days, 1) if days else 0,
+            "on_shift": c.pk in on_shift,
+        })
+    rows.sort(key=lambda r: (r["slsh"], r["usd"], r["payments"]), reverse=True)
+    totals = {k: sum(r[k] for r in rows) for k in ("payments", "slsh", "usd", "voided", "discounted")}
+    totals["on_shift"] = len(on_shift)
+    return render(request, "taxes/team.html", {
+        "rows": rows, "totals": totals, "period": period, "periods": PERIODS,
+        "period_label": PERIODS[period], "chart_height": max(160, min(600, 30 * len(rows) + 40)),
+        "departments": Department.objects.all() if request.user.can_view_tracker else None,
+        "department": department or "",
+        "chart": [{"label": r["user"].employee_id or r["user"].username,
+                   "slsh": float(r["slsh"]), "usd": float(r["usd"])} for r in rows],
+    })
+
+
+# --- Executive director / admin: live collector tracker ---------------------
+
+@login_required
+@role_required("can_view_tracker")
+def tracker(request):
+    return render(request, "taxes/tracker.html", {
+        "departments": Department.objects.all(),
+        "today": timezone.localdate().isoformat(),
+    })
+
+
+ONLINE_MINUTES = 10
+MAX_TRAIL_POINTS = 720  # 12 hours at one point a minute
+
+
+@login_required
+@role_required("can_view_tracker")
+def tracker_data(request):
+    try:
+        day = date.fromisoformat(request.GET.get("date", ""))
+    except ValueError:
+        day = timezone.localdate()
+    tz = timezone.get_current_timezone()
+    start = timezone.make_aware(datetime.combine(day, time.min), tz)
+    end = start + timedelta(days=1)
+
+    collectors = scoped_team(request.user)
+    if request.GET.get("department"):
+        collectors = collectors.filter(department_id=request.GET["department"])
+    collectors = list(collectors)
+    ids = [c.pk for c in collectors]
+
+    trails = {}
+    pings = (
+        LocationPing.objects.filter(collector_id__in=ids, recorded_at__gte=start,
+                                    recorded_at__lt=end)
+        .order_by("recorded_at")
+        .values_list("collector_id", "recorded_at", "latitude", "longitude", "accuracy", "source")
+    )
+    for cid, at, lat, lon, acc, source in pings.iterator(chunk_size=5000):
+        trails.setdefault(cid, []).append([
+            float(lat), float(lon), timezone.localtime(at).strftime("%H:%M"),
+            float(acc) if acc is not None else None, source, at,
+        ])
+
+    payments = TaxCollection.objects.filter(
+        collector_id__in=ids, collected_at__gte=start, collected_at__lt=end
+    )
+    money = {
+        row["collector"]: row for row in payments.values("collector").annotate(
+            count=Count("id", filter=Q(status=COMPLETED)),
+            slsh=Sum("amount_paid", filter=Q(status=COMPLETED, currency="SLSH")),
+            usd=Sum("amount_paid", filter=Q(status=COMPLETED, currency="USD")),
+        )
+    }
+    open_shifts = {
+        s.collector_id: s for s in DutyShift.objects.filter(collector_id__in=ids,
+                                                            ended_at__isnull=True)
+    }
+    now = timezone.now()
+    out = []
+    for c in collectors:
+        trail = trails.get(c.pk, [])
+        last = trail[-1] if trail else None
+        shift = open_shifts.get(c.pk)
+        minutes_ago = int((now - last[5]).total_seconds() // 60) if last else None
+        if shift and last and minutes_ago <= ONLINE_MINUTES:
+            state = "online"
+        elif shift:
+            state = "stale"   # on shift but the phone has not reported recently
+        else:
+            state = "off"
+        m = money.get(c.pk, {})
+        out.append({
+            "id": c.pk,
+            "employee_id": c.employee_id or c.username,
+            "name": c.get_full_name() or c.username,
+            "department": c.department.name if c.department else "",
+            "district": c.assigned_district.name if c.assigned_district else "",
+            "state": state,
+            "shift_started": timezone.localtime(shift.started_at).strftime("%H:%M") if shift else None,
+            "last": {"lat": last[0], "lon": last[1], "time": last[2], "accuracy": last[3],
+                     "minutes_ago": minutes_ago} if last else None,
+            "trail": [p[:5] for p in trail[-MAX_TRAIL_POINTS:]],
+            "payments": m.get("count") or 0,
+            "slsh": float(m.get("slsh") or 0),
+            "usd": float(m.get("usd") or 0),
+        })
+    points = [
+        {**p, "latitude": float(p["latitude"]), "longitude": float(p["longitude"]),
+         "amount_paid": float(p["amount_paid"]),
+         "collected_at": timezone.localtime(p["collected_at"]).strftime("%H:%M")}
+        for p in payments.exclude(latitude__isnull=True).values(
+            "receipt_number", "latitude", "longitude", "amount_paid", "currency",
+            "payer_name", "status", "collected_at", "collector_id")[:5000]
+    ]
+    return JsonResponse({"date": day.isoformat(), "is_today": day == timezone.localdate(),
+                         "collectors": out, "payments": points})

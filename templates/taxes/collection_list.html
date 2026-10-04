@@ -5,7 +5,7 @@
 <form method="get" class="card filters">
   {% for f in form %}<div class="field"><label for="{{ f.id_for_label }}">{{ f.label }}</label>{{ f }}</div>{% endfor %}
   <div class="field"><button class="btn" type="submit">Filter</button></div>
-  {% if user.can_view_reports %}<div class="field"><a class="btn secondary" href="{% url 'collection_export' %}?{{ querystring }}">Export CSV</a></div>{% endif %}
+  {% if user.can_view_financials %}<div class="field"><a class="btn secondary" href="{% url 'collection_export' %}?{{ querystring }}">Export CSV</a></div>{% endif %}
 </form>
 <div class="grid">
   {% for t in totals %}<div class="card stat"><div class="label">Total {{ t.currency }} ({{ t.count }} payments)</div><div class="value">{{ t.total|floatformat:2|intcomma }}</div><div class="label">Discounts: {{ t.discount|floatformat:2|intcomma }}</div></div>{% endfor %}

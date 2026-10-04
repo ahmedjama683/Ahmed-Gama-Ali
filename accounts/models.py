@@ -21,10 +21,11 @@ class User(AbstractUser):
 
     class Role(models.TextChoices):
         ADMIN = "ADMIN", "System administrator"
-        MANAGER = "MANAGER", "Revenue manager"
+        EXECUTIVE = "EXECUTIVE", "Executive director"
+        TREASURY = "TREASURY", "Treasury"
+        AUDITOR = "AUDITOR", "Auditor (read-only)"
         SUPERVISOR = "SUPERVISOR", "Supervisor"
         COLLECTOR = "COLLECTOR", "Tax collector"
-        AUDITOR = "AUDITOR", "Auditor (read-only)"
 
     role = models.CharField(max_length=20, choices=Role.choices, default=Role.COLLECTOR)
     employee_id = models.CharField(
@@ -43,37 +44,55 @@ class User(AbstractUser):
         name = self.get_full_name() or self.username
         return f"{name} ({self.employee_id})" if self.employee_id else name
 
+    def _has_role(self, *roles):
+        return self.is_superuser or self.role in roles
+
     # Role helpers used by views, the API and templates.
+    #
+    #                    collect  data scope         financials  team perf.  tracker map  void
+    #   Collector          yes    own, today only        -           -           -          -
+    #   Supervisor         yes    own department         -       own dept        -         yes
+    #   Treasury            -     everything            yes          -           -          -
+    #   Auditor             -     everything            yes          -           -          -
+    #   Executive director  -     everything            yes      all depts      yes        yes
+    #   Admin               -     everything            yes      all depts      yes        yes
+
     @property
     def is_collector(self):
-        return self.role == self.Role.COLLECTOR
+        return self.role == self.Role.COLLECTOR and not self.is_superuser
 
     @property
     def is_supervisor(self):
-        return self.role == self.Role.SUPERVISOR
+        return self.role == self.Role.SUPERVISOR and not self.is_superuser
 
     @property
     def sees_everything(self):
-        return self.is_superuser or self.role in (
-            self.Role.ADMIN, self.Role.MANAGER, self.Role.AUDITOR
-        )
+        R = self.Role
+        return self._has_role(R.ADMIN, R.EXECUTIVE, R.TREASURY, R.AUDITOR)
 
     @property
     def can_collect(self):
         return self.role in (self.Role.COLLECTOR, self.Role.SUPERVISOR)
 
     @property
-    def can_void(self):
-        return self.is_superuser or self.role in (
-            self.Role.SUPERVISOR, self.Role.MANAGER, self.Role.ADMIN
-        )
+    def can_view_financials(self):
+        """Revenue dashboard, totals and CSV export."""
+        return self.sees_everything
 
     @property
-    def can_view_reports(self):
-        return self.sees_everything or self.is_supervisor
+    def can_view_team(self):
+        """Collector performance page."""
+        return self._has_role(self.Role.SUPERVISOR, self.Role.EXECUTIVE, self.Role.ADMIN)
+
+    @property
+    def can_view_tracker(self):
+        """Live map of where collectors are and have been."""
+        return self._has_role(self.Role.EXECUTIVE, self.Role.ADMIN)
+
+    @property
+    def can_void(self):
+        return self._has_role(self.Role.SUPERVISOR, self.Role.EXECUTIVE, self.Role.ADMIN)
 
     @property
     def can_give_unlimited_discount(self):
-        return self.is_superuser or self.role in (
-            self.Role.SUPERVISOR, self.Role.MANAGER, self.Role.ADMIN
-        )
+        return self._has_role(self.Role.SUPERVISOR, self.Role.EXECUTIVE, self.Role.ADMIN)

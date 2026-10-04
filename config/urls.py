@@ -30,11 +30,16 @@ urlpatterns = [
     path("collections/export.csv", views.collection_export, name="collection_export"),
     path("collections/<int:pk>/void/", views.collection_void, name="collection_void"),
     path("dashboard/", views.dashboard, name="dashboard"),
-    path("map/", views.collection_map, name="collection_map"),
-    path("map/data/", views.collection_map_data, name="collection_map_data"),
+    path("collector/shift/start/", views.shift_start, name="shift_start"),
+    path("collector/shift/end/", views.shift_end, name="shift_end"),
+    path("team/", views.team, name="team"),
+    path("tracker/", views.tracker, name="tracker"),
+    path("tracker/data/", views.tracker_data, name="tracker_data"),
 
     path("api/auth/token/", obtain_auth_token, name="api_token"),
     path("api/me/", api.me, name="api_me"),
+    path("api/tracking/ping/", api.tracking_ping, name="api_tracking_ping"),
+    path("api/tracking/shift/", api.tracking_shift, name="api_tracking_shift"),
     path("api/", include(router.urls)),
 
     path("admin/", admin.site.urls),

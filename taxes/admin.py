@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import AuditLog, TaxCollection, TaxType, Taxpayer
+from .models import AuditLog, DutyShift, LocationPing, TaxCollection, TaxType, Taxpayer
 
 
 @admin.register(TaxType)
@@ -60,3 +60,26 @@ class AuditLogAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return False
+
+
+class ReadOnlyAdmin(admin.ModelAdmin):
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(DutyShift)
+class DutyShiftAdmin(ReadOnlyAdmin):
+    list_display = ["collector", "started_at", "ended_at"]
+    list_filter = ["collector__department"]
+    date_hierarchy = "started_at"
+
+
+@admin.register(LocationPing)
+class LocationPingAdmin(ReadOnlyAdmin):
+    list_display = ["collector", "recorded_at", "latitude", "longitude", "altitude", "accuracy",
+                    "source"]
+    list_filter = ["source", "collector__department"]
+    date_hierarchy = "recorded_at"

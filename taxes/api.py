@@ -3,7 +3,11 @@ REST API at /api/. Lets a future Android app (or an offline-first PWA) record
 collections and sync them. Authenticate with a token from /api/auth/token/.
 """
 
+from datetime import timedelta
+from decimal import Decimal
+
 from django.db import IntegrityError
+from django.utils import timezone
 from rest_framework import mixins, permissions, serializers, status, viewsets
 from rest_framework.decorators import action, api_view
 from rest_framework.response import Response
@@ -11,7 +15,7 @@ from rest_framework.response import Response
 from locations.models import Village
 
 from .access import scoped_collections, scoped_taxpayers
-from .models import AuditLog, TaxCollection, TaxType, Taxpayer
+from .models import AuditLog, DutyShift, LocationPing, TaxCollection, TaxType, Taxpayer
 
 
 class CanCollect(permissions.BasePermission):
@@ -173,3 +177,80 @@ def me(request):
         "role": u.role, "department": u.department.name if u.department else None,
         "assigned_district": u.assigned_district_id,
     })
+
+
+# --- Collector location tracking -------------------------------------------
+
+class PingSerializer(serializers.Serializer):
+    latitude = serializers.DecimalField(max_digits=9, decimal_places=6, min_value=-90, max_value=90)
+    longitude = serializers.DecimalField(max_digits=9, decimal_places=6, min_value=-180,
+                                         max_value=180)
+    altitude = serializers.DecimalField(max_digits=7, decimal_places=1, required=False,
+                                        allow_null=True)
+    accuracy = serializers.DecimalField(max_digits=7, decimal_places=1, required=False,
+                                        allow_null=True)
+    recorded_at = serializers.DateTimeField(required=False)
+
+    def validate_recorded_at(self, value):
+        # Phones may send queued points after losing signal, but not from the future
+        # or from long ago.
+        now = timezone.now()
+        if value > now + timedelta(minutes=5) or value < now - timedelta(hours=24):
+            raise serializers.ValidationError("Time is out of range.")
+        return value
+
+
+def _round(value, places):
+    return None if value is None else Decimal(value).quantize(Decimal(10) ** -places)
+
+
+@api_view(["POST"])
+def tracking_ping(request):
+    """
+    Save one position, or a batch queued while offline:
+    {"latitude": 9.56, "longitude": 44.07, "altitude": 1334, "accuracy": 12}
+    {"pings": [{...}, {...}]}
+    Only accepted while the collector has an open duty shift.
+    """
+    if not request.user.can_collect:
+        return Response(status=status.HTTP_403_FORBIDDEN)
+    shift = DutyShift.open_for(request.user)
+    if not shift:
+        return Response({"detail": "No open shift."}, status=status.HTTP_409_CONFLICT)
+    items = request.data.get("pings") if isinstance(request.data, dict) else None
+    serializer = PingSerializer(data=items if items is not None else [request.data], many=True)
+    serializer.is_valid(raise_exception=True)
+    pings = [
+        LocationPing(
+            collector=request.user, shift=shift,
+            recorded_at=max(p.get("recorded_at") or timezone.now(), shift.started_at),
+            latitude=_round(p["latitude"], 6), longitude=_round(p["longitude"], 6),
+            altitude=_round(p.get("altitude"), 1), accuracy=_round(p.get("accuracy"), 1),
+        )
+        for p in serializer.validated_data[:500]
+    ]
+    LocationPing.objects.bulk_create(pings)
+    return Response({"saved": len(pings)}, status=status.HTTP_201_CREATED)
+
+
+@api_view(["GET", "POST"])
+def tracking_shift(request):
+    """GET: current shift. POST {"action": "start"} or {"action": "end"} (for a mobile app)."""
+    if not request.user.can_collect:
+        return Response(status=status.HTTP_403_FORBIDDEN)
+    shift = DutyShift.open_for(request.user)
+    if request.method == "POST":
+        action_name = request.data.get("action")
+        if action_name == "start" and not shift:
+            shift = DutyShift.objects.create(collector=request.user)
+            AuditLog.record(request, "shift.start", shift, via="api")
+        elif action_name == "end" and shift:
+            shift.ended_at = timezone.now()
+            shift.save(update_fields=["ended_at"])
+            AuditLog.record(request, "shift.end", shift, via="api")
+            shift = None
+        elif action_name not in ("start", "end"):
+            return Response({"action": ["Use 'start' or 'end'."]},
+                            status=status.HTTP_400_BAD_REQUEST)
+    return Response({"on_shift": bool(shift),
+                     "started_at": shift.started_at if shift else None})
