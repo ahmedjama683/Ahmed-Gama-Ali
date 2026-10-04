@@ -179,7 +179,22 @@ This is what makes it work on every collector's phone. You need:
 1. **A server (VPS)**: Ubuntu 24.04, 2 CPU, 4 GB RAM, 80 GB disk is plenty to start. Any provider works (local Somaliland data centres, or Hetzner, DigitalOcean, AWS…). Government data-hosting rules may say where it must be.
 2. **A domain name**, e.g. `tax.hargeisa.gov.so` (or any domain you own), with a DNS **A record** pointing to the server's IP address.
 
-Then, on the server:
+**Easiest: the one-command installer.** On a fresh Ubuntu 24.04 server, after the DNS A record points to it:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ahmedjama683/Ahmed-Gama-Ali/master/deploy/install.sh -o install.sh
+sudo bash install.sh
+```
+
+It asks for the domain, then:
+* installs Docker and a firewall
+* generates secret passwords
+* starts PostgreSQL, the app and HTTPS
+* loads reference data
+* schedules nightly backups
+* asks you to create the first admin account
+
+**Or step by step**, on the server:
 
 ```bash
 # 1. Install Docker
