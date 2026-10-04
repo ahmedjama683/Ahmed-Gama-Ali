@@ -16,8 +16,8 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 1
 fi
 
-read -rp "Domain name for the system (e.g. tax.example.com): " DOMAIN
-if [ -z "$DOMAIN" ]; then echo "A domain is required." >&2; exit 1; fi
+read -rp "Domain name for the system [hargeisa.pillarsdo.org]: " DOMAIN
+DOMAIN="${DOMAIN:-hargeisa.pillarsdo.org}"
 read -rp "Client government name [Hargeisa Local Government]: " CLIENT_NAME
 CLIENT_NAME="${CLIENT_NAME:-Hargeisa Local Government}"
 read -rp "Operating company name (shown in the footer and on receipts, optional): " OPERATOR_NAME

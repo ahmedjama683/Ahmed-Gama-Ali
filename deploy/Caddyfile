@@ -1,4 +1,4 @@
-# SITE_ADDRESS is your domain (e.g. tax.hargeisa.gov.so). Caddy then fetches
+# SITE_ADDRESS is your domain (e.g. hargeisa.pillarsdo.org). Caddy then fetches
 # a free Let's Encrypt certificate automatically. ":80" = plain HTTP (testing).
 {$SITE_ADDRESS}
 

@@ -178,7 +178,7 @@ Run the tests: `python manage.py test`
 This is what makes it work on every collector's phone. You need:
 
 1. **A server (VPS)**: Ubuntu 24.04, 2 CPU, 4 GB RAM, 80 GB disk is plenty to start. Any provider works (local Somaliland data centres, or Hetzner, DigitalOcean, AWS…). Government data-hosting rules may say where it must be.
-2. **A domain name**, e.g. `tax.hargeisa.gov.so` (or any domain you own), with a DNS **A record** pointing to the server's IP address.
+2. **A domain name.** This deployment uses `hargeisa.pillarsdo.org`, a subdomain of the operator's domain `pillarsdo.org`. In the DNS settings where `pillarsdo.org` is managed, add a record: **Type** `A`, **Name** `hargeisa`, **Value** the server's IP address. The main `pillarsdo.org` website is not affected.
 
 **Easiest: the one-command installer.** On a fresh Ubuntu 24.04 server, after the DNS A record points to it:
 
@@ -209,9 +209,9 @@ cp .env.example .env
 nano .env
 #   DJANGO_SECRET_KEY = a long random string
 #                       (python3 -c "import secrets; print(secrets.token_urlsafe(50))")
-#   DJANGO_ALLOWED_HOSTS = tax.hargeisa.gov.so
-#   DJANGO_CSRF_TRUSTED_ORIGINS = https://tax.hargeisa.gov.so
-#   SITE_ADDRESS = tax.hargeisa.gov.so      <- Caddy gets a free HTTPS certificate
+#   DJANGO_ALLOWED_HOSTS = hargeisa.pillarsdo.org
+#   DJANGO_CSRF_TRUSTED_ORIGINS = https://hargeisa.pillarsdo.org
+#   SITE_ADDRESS = hargeisa.pillarsdo.org      <- Caddy gets a free HTTPS certificate
 #   DJANGO_SECURE = True
 #   POSTGRES_PASSWORD and the password inside DATABASE_URL = the same strong password
 
@@ -228,7 +228,7 @@ crontab -e   # add:
 #   30 2 * * * cd /opt/tax && docker compose exec -T web python manage.py purge_location_pings --days 90
 ```
 
-Every collector can now open `https://tax.hargeisa.gov.so/collector/` on their
+Every collector can now open `https://hargeisa.pillarsdo.org/collector/` on their
 phone, and GPS works because the site uses HTTPS. On Android, choose "Add to Home
 screen" in Chrome so it opens like an app.
 
@@ -265,7 +265,7 @@ The system is designed to be run by a company **on behalf of** a municipality.
 | `MAP_CENTER` | 9.5624,44.0770 | Where the tracker map opens |
 
 **One installation per municipality.** To serve another city, install a separate
-copy on its own server (or subdomain, e.g. `berbera.yourcompany.com`) with its own
+copy on its own server (or subdomain, e.g. `berbera.pillarsdo.org`) with its own
 `.env` and database. Each client's data stays fully separate.
 
 **Points to agree in the contract with the municipality:**
